@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "711521421896",
+    "project_id": "satti-ecom",
+    "storage_bucket": "satti-ecom.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:711521421896:android:94b544fed8be41a0f9267d",
+        "android_client_info": {
+          "package_name": "com.example.airdepart"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBMtcMKvTwfG-8iUdwV8H12XStmJsz-QPw"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
