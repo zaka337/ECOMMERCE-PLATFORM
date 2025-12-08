@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../providers/auth_provider.dart'; // Ensure this path is correct
+import '../providers/auth_provider.dart'; 
 import 'home_screen.dart';
 
 class AuthScreen extends ConsumerStatefulWidget {
@@ -57,8 +57,6 @@ class _AuthScreenState extends ConsumerState<AuthScreen> with SingleTickerProvid
     });
   }
 
-  // --- LOGIC FROM YOUR ORIGINAL FILES ---
-  
   Future<void> handleAuth() async {
     final email = emailController.text.trim();
     final password = passController.text.trim();
@@ -125,6 +123,7 @@ class _AuthScreenState extends ConsumerState<AuthScreen> with SingleTickerProvid
       else if (e.code == 'wrong-password') message = 'Wrong password provided.';
       else if (e.code == 'weak-password') message = 'The password provided is too weak.';
       else if (e.code == 'email-already-in-use') message = 'The account already exists for that email.';
+      else if (e.code == 'invalid-email') message = 'The email address is invalid.';
       
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(message), backgroundColor: Colors.red),
@@ -143,7 +142,6 @@ class _AuthScreenState extends ConsumerState<AuthScreen> with SingleTickerProvid
     // Streetwear Palette
     const bgCream = Color(0xFFEFF3E6);
     const cardDark = Color(0xFF181816);
-    const accentGreen = Color(0xFFB0FFA3);
 
     return Scaffold(
       backgroundColor: cardDark, // Top half is dark
@@ -252,7 +250,6 @@ class _AuthScreenState extends ConsumerState<AuthScreen> with SingleTickerProvid
                             isPassword: true,
                           ),
                           
-                          // Extra "Forgot Password" link for Login
                           if (isLogin) ...[
                             const SizedBox(height: 15),
                             Row(
@@ -334,7 +331,6 @@ class _AuthScreenState extends ConsumerState<AuthScreen> with SingleTickerProvid
                         ),
                       ],
                     ),
-                    // Safe area padding
                     SizedBox(height: MediaQuery.of(context).viewInsets.bottom > 0 ? 20 : 0),
                   ],
                 ),
@@ -410,7 +406,7 @@ class _AuthScreenState extends ConsumerState<AuthScreen> with SingleTickerProvid
         style: const TextStyle(color: Colors.black87),
         decoration: InputDecoration(
           hintText: hint,
-          hintStyle: TextStyle(color: Colors.black38),
+          hintStyle: const TextStyle(color: Colors.black38),
           border: InputBorder.none,
           prefixIcon: Icon(icon, color: Colors.black54),
           suffixIcon: isPassword
