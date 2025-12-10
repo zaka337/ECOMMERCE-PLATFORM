@@ -1,33 +1,283 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/products_provider.dart';
-import 'product_detail_screen.dart';
-import 'cart_screen.dart';
+import '../models/product.dart';
+// Ensure these imports point to your actual files
+import 'product_detail_screen.dart'; 
+import 'cart_screen.dart'; 
 
-class HomeScreen extends ConsumerWidget {
+class HomeScreen extends ConsumerStatefulWidget {
   final String username;
 
   const HomeScreen({Key? key, required this.username}) : super(key: key);
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends ConsumerState<HomeScreen> {
+  // --- CLASSICAL THEME COLORS ---
+  static const bgParchment = Color(0xFFF9F5EB); 
+  static const bgCard = Color(0xFFFDFBF7);      
+  static const textInk = Color(0xFF2C221C);     
+  static const accentGold = Color(0xFFC5A059);  
+  static const accentBurgundy = Color(0xFF7B1E1E); 
+  static const frameBorder = Color(0xFFD4C5A5); 
+
+  // --- TYPOGRAPHY ---
+  static const serifStyle = TextStyle(fontFamily: 'Times New Roman', package: null);
+
+  @override
+  void initState() {
+    super.initState();
+    // Fetch products when screen loads
+    Future.microtask(() => ref.read(productsProvider.notifier).fetchProducts());
+  }
+
+  // --- DIALOG: CREATE / EDIT PRODUCT ---
+  void _showProductDialog(BuildContext context, {Product? existingProduct}) {
+    final isEditing = existingProduct != null;
+    final nameController = TextEditingController(text: existingProduct?.name ?? '');
+    final priceController = TextEditingController(text: existingProduct?.price.toString() ?? '');
+    final descController = TextEditingController(text: existingProduct?.description ?? '');
+    final imageController = TextEditingController(text: existingProduct?.imageUrl ?? '');
+    bool isLoading = false;
+
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          backgroundColor: bgParchment,
+          shape: BeveledRectangleBorder(
+            side: const BorderSide(color: accentGold, width: 2),
+            borderRadius: BorderRadius.circular(2),
+          ),
+          title: Column(
+            children: [
+              Text(
+                isEditing ? 'AMEND LEDGER' : 'NEW ACQUISITION',
+                style: serifStyle.copyWith(
+                  color: accentBurgundy,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 2.0,
+                  fontSize: 18,
+                ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 8),
+              const Divider(color: accentGold, thickness: 1, indent: 40, endIndent: 40),
+            ],
+          ),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _buildVintageTextField(nameController, 'Artifact Name'),
+                const SizedBox(height: 12),
+                _buildVintageTextField(priceController, 'Value (Gold Coins)', isNumber: true),
+                const SizedBox(height: 12),
+                _buildVintageTextField(descController, 'Description / History'),
+                const SizedBox(height: 12),
+                _buildVintageTextField(imageController, 'Visual Reference (URL)'),
+              ],
+            ),
+          ),
+          actionsAlignment: MainAxisAlignment.center,
+          actions: [
+            if (!isLoading)
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(),
+                child: Text('DISCARD', style: serifStyle.copyWith(color: textInk)),
+              ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: accentBurgundy,
+                foregroundColor: bgParchment,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+              ),
+              onPressed: isLoading ? null : () async {
+                // Validation with user feedback
+                if (nameController.text.trim().isEmpty) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Please enter an artifact name', style: serifStyle),
+                      backgroundColor: accentBurgundy,
+                    ),
+                  );
+                  return;
+                }
+
+                if (priceController.text.trim().isEmpty) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Please enter a value', style: serifStyle),
+                      backgroundColor: accentBurgundy,
+                    ),
+                  );
+                  return;
+                }
+
+                final priceValue = double.tryParse(priceController.text.trim());
+                if (priceValue == null || priceValue <= 0) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Please enter a valid price', style: serifStyle),
+                      backgroundColor: accentBurgundy,
+                    ),
+                  );
+                  return;
+                }
+
+                setDialogState(() {
+                  isLoading = true;
+                });
+
+                try {
+                  final product = Product(
+                    id: existingProduct?.id ?? '', // ID handled by provider for new items
+                    name: nameController.text.trim(),
+                    description: descController.text.trim(),
+                    price: priceValue,
+                    imageUrl: imageController.text.trim(),
+                  );
+
+                  if (isEditing) {
+                    await ref.read(productsProvider.notifier).updateProduct(product.id, product);
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text('Record updated successfully', style: serifStyle),
+                          backgroundColor: accentGold,
+                        ),
+                      );
+                    }
+                  } else {
+                    await ref.read(productsProvider.notifier).addProduct(product);
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text('New entry recorded successfully', style: serifStyle),
+                          backgroundColor: accentGold,
+                        ),
+                      );
+                    }
+                  }
+
+                  if (context.mounted) {
+                    Navigator.of(ctx).pop();
+                  }
+                } catch (e) {
+                  setDialogState(() {
+                    isLoading = false;
+                  });
+                  
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text(
+                          'Error: ${e.toString().replaceAll('Exception: ', '')}',
+                          style: serifStyle,
+                        ),
+                        backgroundColor: accentBurgundy,
+                        duration: const Duration(seconds: 4),
+                      ),
+                    );
+                  }
+                }
+              },
+              child: isLoading
+                  ? SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        valueColor: AlwaysStoppedAnimation<Color>(bgParchment),
+                      ),
+                    )
+                  : Text(
+                      isEditing ? 'UPDATE RECORD' : 'RECORD ENTRY',
+                      style: serifStyle.copyWith(fontWeight: FontWeight.bold),
+                    ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // --- HELPER: VINTAGE INPUT ---
+  Widget _buildVintageTextField(TextEditingController controller, String label, {bool isNumber = false}) {
+    return TextField(
+      controller: controller,
+      keyboardType: isNumber ? TextInputType.number : TextInputType.text,
+      style: serifStyle.copyWith(color: textInk),
+      decoration: InputDecoration(
+        labelText: label,
+        labelStyle: serifStyle.copyWith(color: textInk.withOpacity(0.6)),
+        enabledBorder: const UnderlineInputBorder(borderSide: BorderSide(color: frameBorder)),
+        focusedBorder: const UnderlineInputBorder(borderSide: BorderSide(color: accentBurgundy)),
+        contentPadding: const EdgeInsets.symmetric(vertical: 4),
+        isDense: true,
+      ),
+    );
+  }
+
+  // --- DELETE CONFIRMATION ---
+  void _confirmDelete(BuildContext context, String productId) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: bgParchment,
+        title: Text('Dispose Artifact?', style: serifStyle.copyWith(color: textInk)),
+        content: Text('This action acts as an expungement from the archives.', style: serifStyle.copyWith(color: textInk)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: Text('KEEP', style: serifStyle.copyWith(color: textInk)),
+          ),
+          TextButton(
+            onPressed: () async {
+              try {
+                await ref.read(productsProvider.notifier).deleteProduct(productId);
+                if (context.mounted) {
+                  Navigator.of(ctx).pop();
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Artifact expunged from archives', style: serifStyle),
+                      backgroundColor: accentGold,
+                    ),
+                  );
+                }
+              } catch (e) {
+                if (context.mounted) {
+                  Navigator.of(ctx).pop();
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(
+                        'Error: ${e.toString().replaceAll('Exception: ', '')}',
+                        style: serifStyle,
+                      ),
+                      backgroundColor: accentBurgundy,
+                    ),
+                  );
+                }
+              }
+            },
+            child: Text('EXPUNGE', style: serifStyle.copyWith(color: accentBurgundy, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final products = ref.watch(productsProvider);
-
-    // --- CLASSICAL THEME COLORS ---
-    const bgParchment = Color(0xFFF9F5EB); // Light cream paper
-    const bgCard = Color(0xFFFDFBF7);      // Slightly lighter for cards
-    const textInk = Color(0xFF2C221C);     // Dark sepia/brown ink
-    const accentGold = Color(0xFFC5A059);  // Muted antique gold
-    const accentBurgundy = Color(0xFF7B1E1E); // Deep royal red
-    const frameBorder = Color(0xFFD4C5A5); // Beige frame border
-
-    // --- TYPOGRAPHY STYLES ---
-    const serifStyle = TextStyle(fontFamily: 'Times New Roman', package: null);
 
     return Scaffold(
       backgroundColor: bgParchment,
       
-      // --- APP BAR: CLASSIC HEADER ---
+      // --- APP BAR ---
       appBar: AppBar(
         elevation: 0,
         backgroundColor: bgParchment,
@@ -48,60 +298,32 @@ class HomeScreen extends ConsumerWidget {
               ),
             ),
             const SizedBox(height: 4),
-            // Decorative Underline
-            Container(
-              height: 1,
-              width: 60,
-              color: accentGold,
-            ),
-            Container(
-              margin: const EdgeInsets.only(top: 2),
-              height: 1,
-              width: 40,
-              color: accentGold,
-            ),
+            Container(height: 1, width: 60, color: accentGold),
+            Container(margin: const EdgeInsets.only(top: 2), height: 1, width: 40, color: accentGold),
           ],
         ),
         actions: [
           Padding(
             padding: const EdgeInsets.only(right: 16.0),
-            child: Stack(
-              alignment: Alignment.center,
-              children: [
-                IconButton(
-                  icon: const Icon(Icons.shopping_bag_outlined, color: textInk),
-                  onPressed: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(builder: (context) => const CartScreen()),
-                    );
-                  },
-                ),
-                Positioned(
-                  right: 4,
-                  top: 8,
-                  child: Container(
-                    padding: const EdgeInsets.all(4),
-                    decoration: BoxDecoration(
-                      color: accentBurgundy,
-                      shape: BoxShape.circle,
-                      border: Border.all(color: bgParchment, width: 1.5),
-                    ),
-                    child: const Text(
-                      '3', // Example count
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 10,
-                        fontWeight: FontWeight.bold,
-                        fontFamily: 'Times New Roman',
-                      ),
-                    ),
-                  ),
-                ),
-              ],
+            child: IconButton(
+              icon: const Icon(Icons.shopping_bag_outlined, color: textInk),
+              onPressed: () {
+                 Navigator.push(context, MaterialPageRoute(builder: (_) => const CartScreen()));
+              },
             ),
           ),
         ],
+      ),
+
+      // --- FLOATING ACTION BUTTON (NEW FEATURE) ---
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: () => _showProductDialog(context),
+        backgroundColor: accentBurgundy,
+        foregroundColor: bgParchment,
+        // FIXED: Using standard 'Icons.edit' because 'Icons.edit_quill' is missing
+        icon: const Icon(Icons.edit), 
+        label: Text("NEW ENTRY", style: serifStyle.copyWith(fontWeight: FontWeight.bold, letterSpacing: 1)),
+        shape: BeveledRectangleBorder(borderRadius: BorderRadius.circular(10)),
       ),
 
       body: Padding(
@@ -109,11 +331,10 @@ class HomeScreen extends ConsumerWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            
             // --- GREETING ---
             Center(
               child: Text(
-                'Est. 2024 • Greetings, $username',
+                'Est. 2024 • Greetings, ${widget.username}',
                 style: serifStyle.copyWith(
                   color: textInk.withOpacity(0.6),
                   fontSize: 14,
@@ -124,14 +345,14 @@ class HomeScreen extends ConsumerWidget {
             ),
             const SizedBox(height: 20),
 
-            // --- HERO BANNER: THE SCROLL ---
+            // --- HERO BANNER ---
             Container(
-              height: 140, // Reduced height from 180 to 140
+              height: 140,
               width: double.infinity,
               decoration: BoxDecoration(
-                color: const Color(0xFFEBE3D5), // Darker parchment
+                color: const Color(0xFFEBE3D5),
                 border: Border.all(color: accentGold, width: 1),
-                borderRadius: BorderRadius.circular(2), // Sharp corners look more classic
+                borderRadius: BorderRadius.circular(2),
                 boxShadow: [
                   BoxShadow(
                     color: Colors.black.withOpacity(0.05),
@@ -142,15 +363,13 @@ class HomeScreen extends ConsumerWidget {
               ),
               child: Stack(
                 children: [
-                  // Corner Ornaments (Simulated with borders)
                   Positioned(top: 8, left: 8, child: _CornerOrnament(color: accentGold)),
                   Positioned(top: 8, right: 8, child: RotatedBox(quarterTurns: 1, child: _CornerOrnament(color: accentGold))),
                   Positioned(bottom: 8, left: 8, child: RotatedBox(quarterTurns: 3, child: _CornerOrnament(color: accentGold))),
                   Positioned(bottom: 8, right: 8, child: RotatedBox(quarterTurns: 2, child: _CornerOrnament(color: accentGold))),
 
-                  // Content
                   Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 12.0), // Reduced padding
+                    padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 12.0),
                     child: Row(
                       children: [
                         Expanded(
@@ -163,7 +382,7 @@ class HomeScreen extends ConsumerWidget {
                                 style: serifStyle.copyWith(
                                   color: accentBurgundy,
                                   fontWeight: FontWeight.bold,
-                                  fontSize: 10, // Reduced font size
+                                  fontSize: 10,
                                   letterSpacing: 2,
                                 ),
                               ),
@@ -171,7 +390,7 @@ class HomeScreen extends ConsumerWidget {
                               Text(
                                 'Grand Opening\nSale Event',
                                 style: serifStyle.copyWith(
-                                  fontSize: 20, // Reduced font size
+                                  fontSize: 20,
                                   color: textInk,
                                   height: 1.1,
                                   fontWeight: FontWeight.w600,
@@ -180,9 +399,7 @@ class HomeScreen extends ConsumerWidget {
                               const SizedBox(height: 8),
                               Container(
                                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                                decoration: BoxDecoration(
-                                  border: Border.all(color: textInk),
-                                ),
+                                decoration: BoxDecoration(border: Border.all(color: textInk)),
                                 child: Text(
                                   "VIEW COLLECTION",
                                   style: serifStyle.copyWith(fontSize: 9, fontWeight: FontWeight.bold),
@@ -191,20 +408,16 @@ class HomeScreen extends ConsumerWidget {
                             ],
                           ),
                         ),
-                        // Vintage Image Placeholder
+                        // Placeholder Icon
                         Container(
-                          width: 80, // Reduced width
-                          height: 90, // Reduced height
+                          width: 80,
+                          height: 90,
                           decoration: BoxDecoration(
                             border: Border.all(color: Colors.white, width: 3),
-                            boxShadow: [
-                              BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius: 5),
-                            ],
-                            image: const DecorationImage(
-                              image: AssetImage('assets/images/shoe.png'), // Keeping your asset
-                              fit: BoxFit.cover,
-                            ),
+                            boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius: 5)],
+                            color: Colors.grey[300],
                           ),
+                          child: const Icon(Icons.diamond_outlined, size: 40, color: Colors.grey),
                         ),
                       ],
                     ),
@@ -217,13 +430,15 @@ class HomeScreen extends ConsumerWidget {
 
             // --- PRODUCT GRID ---
             Expanded(
-              child: GridView.builder(
-                padding: const EdgeInsets.only(bottom: 20),
+              child: products.isEmpty 
+              ? Center(child: Text("The archives are empty...", style: serifStyle.copyWith(color: textInk.withOpacity(0.5))))
+              : GridView.builder(
+                padding: const EdgeInsets.only(bottom: 80), // Space for FAB
                 gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                   crossAxisCount: 2,
                   mainAxisSpacing: 20,
                   crossAxisSpacing: 20,
-                  childAspectRatio: 0.65, // Taller for that portrait frame look
+                  childAspectRatio: 0.60,
                 ),
                 itemCount: products.length,
                 itemBuilder: (context, index) {
@@ -231,10 +446,8 @@ class HomeScreen extends ConsumerWidget {
                   return GestureDetector(
                     onTap: () {
                       Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => ProductDetailScreen(product: product),
-                        ),
+                        context, 
+                        MaterialPageRoute(builder: (_) => ProductDetailScreen(product: product))
                       );
                     },
                     child: Container(
@@ -264,7 +477,7 @@ class HomeScreen extends ConsumerWidget {
                               child: Image.network(
                                 product.imageUrl,
                                 fit: BoxFit.cover,
-                                errorBuilder: (c, e, s) => Center(
+                                errorBuilder: (c, e, s) => const Center(
                                   child: Icon(Icons.broken_image, color: frameBorder),
                                 ),
                               ),
@@ -274,7 +487,7 @@ class HomeScreen extends ConsumerWidget {
                           Expanded(
                             flex: 2,
                             child: Padding(
-                              padding: const EdgeInsets.symmetric(horizontal: 12.0),
+                              padding: const EdgeInsets.symmetric(horizontal: 8.0),
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.center,
                                 children: [
@@ -292,14 +505,14 @@ class HomeScreen extends ConsumerWidget {
                                   ),
                                   const SizedBox(height: 4),
                                   Text(
-                                    "No. ${index + 1042}", // Fake catalog number
+                                    "No. ${product.id.substring(0, product.id.length > 4 ? 4 : product.id.length)}",
                                     style: serifStyle.copyWith(
                                       fontSize: 10,
                                       color: textInk.withOpacity(0.5),
                                       fontStyle: FontStyle.italic,
                                     ),
                                   ),
-                                  const SizedBox(height: 8),
+                                  const SizedBox(height: 4),
                                   Text(
                                     '\$${product.price.toStringAsFixed(2)}',
                                     style: serifStyle.copyWith(
@@ -308,16 +521,27 @@ class HomeScreen extends ConsumerWidget {
                                       fontWeight: FontWeight.w600,
                                     ),
                                   ),
-                                  const SizedBox(height: 8),
-                                  // "Acquire" Text Button (instead of cart icon)
-                                  Text(
-                                    "~ Acquire ~",
-                                    style: serifStyle.copyWith(
-                                      fontSize: 10,
-                                      color: textInk,
-                                      decoration: TextDecoration.underline,
-                                    ),
+                                  const Spacer(),
+                                  // --- EDIT / DELETE ACTIONS ---
+                                  Row(
+                                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                                    children: [
+                                      IconButton(
+                                        icon: const Icon(Icons.edit, size: 18, color: textInk),
+                                        onPressed: () => _showProductDialog(context, existingProduct: product),
+                                        padding: EdgeInsets.zero,
+                                        constraints: const BoxConstraints(),
+                                      ),
+                                      Container(width: 1, height: 12, color: frameBorder),
+                                      IconButton(
+                                        icon: const Icon(Icons.delete_outline, size: 18, color: accentBurgundy),
+                                        onPressed: () => _confirmDelete(context, product.id),
+                                        padding: EdgeInsets.zero,
+                                        constraints: const BoxConstraints(),
+                                      ),
+                                    ],
                                   ),
+                                  const SizedBox(height: 8),
                                 ],
                               ),
                             ),
@@ -365,13 +589,10 @@ class _OrnamentPainter extends CustomPainter {
       ..strokeWidth = 1.5;
 
     final path = Path();
-    // Simple L-shape with a curve for decoration
     path.moveTo(0, size.height);
     path.lineTo(0, 0);
     path.lineTo(size.width, 0);
     canvas.drawPath(path, paint);
-
-    // Add a dot
     canvas.drawCircle(const Offset(4, 4), 1, Paint()..color = color);
   }
 

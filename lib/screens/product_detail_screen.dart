@@ -15,14 +15,19 @@ class ProductDetailScreen extends ConsumerStatefulWidget {
 }
 
 class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
+  // --- STATIC DATA FOR DISPLAY (Since DB doesn't have these fields yet) ---
+  final List<String> _availableSizes = ['7', '8', '9', '10', '11', '12'];
+  final List<String> _availableColors = ['Charcoal', 'Navy', 'Burgundy', 'Camel'];
+
   late String selectedSize;
   late String selectedColor;
 
   @override
   void initState() {
     super.initState();
-    selectedSize = widget.product.sizes.first;
-    selectedColor = widget.product.colors.first;
+    // Default to the first available option
+    selectedSize = _availableSizes.first;
+    selectedColor = _availableColors.first;
   }
 
   @override
@@ -145,7 +150,7 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
                         const Icon(Icons.star, color: accentGold, size: 16),
                         const SizedBox(width: 4),
                         Text(
-                          '${widget.product.rating}',
+                          '4.8', // Static rating since model doesn't have it yet
                           style: serifStyle.copyWith(
                             fontWeight: FontWeight.bold,
                             color: textInk,
@@ -187,7 +192,7 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
               const SizedBox(height: 12),
               Wrap(
                 spacing: 12,
-                children: widget.product.sizes.map((size) {
+                children: _availableSizes.map((size) {
                   final isSelected = selectedSize == size;
                   return GestureDetector(
                     onTap: () => setState(() => selectedSize = size),
@@ -230,7 +235,7 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
               const SizedBox(height: 12),
               Wrap(
                 spacing: 16,
-                children: widget.product.colors.map((color) {
+                children: _availableColors.map((color) {
                   final isSelected = selectedColor == color;
                   final colorValue = _getColorFromString(color);
                   return GestureDetector(
@@ -281,6 +286,7 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
                     shadowColor: accentBurgundy.withOpacity(0.4),
                   ),
                   onPressed: () {
+                    // NOTE: Ensure your CartProvider is updated to accept these arguments
                     ref.read(cartProvider.notifier).addToCart(
                           product: widget.product,
                           size: selectedSize,
@@ -324,16 +330,17 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
 
   Color _getColorFromString(String colorName) {
     switch (colorName.toLowerCase()) {
-      case 'blue': return Colors.blue[800]!; // Darker, more royal blue
+      case 'blue': return Colors.blue[800]!;
       case 'black': return const Color(0xFF1A1A1A);
       case 'white': return const Color(0xFFF5F5F5);
       case 'gray':
       case 'grey': return Colors.grey;
       case 'navy': return const Color(0xFF001F3F);
-      case 'red': return const Color(0xFF8B0000); // Dark red
+      case 'red': 
+      case 'burgundy': return const Color(0xFF8B0000);
       case 'charcoal': return const Color(0xFF36454F);
       case 'camel': return const Color(0xFFC19A6B);
-      case 'green': return const Color(0xFF006400); // Dark green
+      case 'green': return const Color(0xFF006400);
       default: return Colors.grey;
     }
   }

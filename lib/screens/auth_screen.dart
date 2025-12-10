@@ -1,8 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../providers/auth_provider.dart'; 
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:google_sign_in/google_sign_in.dart'; // Import Google Sign In
+import '../providers/auth_provider.dart';
 import 'home_screen.dart';
+
+// ==========================================
+// 1. MAIN AUTH SCREEN (Login / Signup)
+// ==========================================
 
 class AuthScreen extends ConsumerStatefulWidget {
   final bool initialIsLogin;
@@ -17,13 +23,14 @@ class _AuthScreenState extends ConsumerState<AuthScreen> with SingleTickerProvid
   late bool isLogin;
   bool isLoading = false;
   bool isPasswordVisible = false;
+  bool rememberMe = false;
 
   // Controllers
   final nameController = TextEditingController();
   final emailController = TextEditingController();
   final passController = TextEditingController();
-  
-  // Animation for the toggle
+
+  // Animation
   late AnimationController _animationController;
   late Animation<double> _fadeAnimation;
 
@@ -31,6 +38,12 @@ class _AuthScreenState extends ConsumerState<AuthScreen> with SingleTickerProvid
   void initState() {
     super.initState();
     isLogin = widget.initialIsLogin;
+    
+    // Only load saved email if we are starting on the Login page
+    if (isLogin) {
+      _loadUserEmail();
+    }
+
     _animationController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 300),
@@ -48,15 +61,94 @@ class _AuthScreenState extends ConsumerState<AuthScreen> with SingleTickerProvid
     super.dispose();
   }
 
+  // --- REMEMBER ME LOGIC ---
+  void _loadUserEmail() async {
+    try {
+      SharedPreferences prefs = await SharedPreferences.getInstance();
+      String? savedEmail = prefs.getString('saved_email');
+      bool? savedRememberMe = prefs.getBool('remember_me');
+
+      if (isLogin && savedRememberMe == true && savedEmail != null) {
+        setState(() {
+          rememberMe = true;
+          emailController.text = savedEmail;
+        });
+      }
+    } catch (e) {
+      debugPrint("Error loading user email: $e");
+    }
+  }
+
   void toggleAuthMode() {
     setState(() {
       isLogin = !isLogin;
-      // Reset animation to trigger fade effect for fields
       _animationController.reset();
       _animationController.forward();
     });
+
+    if (isLogin) {
+      _loadUserEmail();
+    }
   }
 
+  // --- GOOGLE SIGN IN LOGIC ---
+  Future<void> _handleGoogleSignIn() async {
+    setState(() => isLoading = true);
+
+    try {
+      // 1. Trigger the Google Authentication flow
+      final GoogleSignInAccount? googleUser = await GoogleSignIn().signIn();
+      
+      if (googleUser == null) {
+        // User canceled the sign-in
+        setState(() => isLoading = false);
+        return;
+      }
+
+      // 2. Obtain the auth details from the request
+      final GoogleSignInAuthentication googleAuth = await googleUser.authentication;
+
+      // 3. Create a new credential
+      final OAuthCredential credential = GoogleAuthProvider.credential(
+        accessToken: googleAuth.accessToken,
+        idToken: googleAuth.idToken,
+      );
+
+      // 4. Sign in to Firebase with the credential
+      final UserCredential userCredential = await FirebaseAuth.instance.signInWithCredential(credential);
+
+      // 5. Update Riverpod
+      ref.read(authStateProvider.notifier).state = {
+        'isLoggedIn': true,
+        'username': userCredential.user?.displayName ?? "Google User",
+        'uid': userCredential.user?.uid,
+      };
+
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Google Sign-In Successful 🎉")),
+      );
+
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (_) => HomeScreen(username: userCredential.user?.displayName ?? "User")),
+        (route) => false,
+      );
+
+    } on FirebaseAuthException catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.message ?? "Google Sign-In Failed"), backgroundColor: Colors.red),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Error: $e"), backgroundColor: Colors.red),
+      );
+    } finally {
+      if (mounted) setState(() => isLoading = false);
+    }
+  }
+
+  // --- EMAIL/PASS AUTH LOGIC ---
   Future<void> handleAuth() async {
     final email = emailController.text.trim();
     final password = passController.text.trim();
@@ -83,16 +175,27 @@ class _AuthScreenState extends ConsumerState<AuthScreen> with SingleTickerProvid
       String displayName = name;
 
       if (isLogin) {
-        // LOGIN LOGIC
+        // LOGIN
         userCredential = await FirebaseAuth.instance.signInWithEmailAndPassword(
-          email: email, 
+          email: email,
           password: password
         );
         displayName = userCredential.user?.displayName ?? "User";
+
+        // Save Email if "Remember Me" is checked
+        SharedPreferences prefs = await SharedPreferences.getInstance();
+        if (rememberMe) {
+          await prefs.setString('saved_email', email);
+          await prefs.setBool('remember_me', true);
+        } else {
+          await prefs.remove('saved_email');
+          await prefs.setBool('remember_me', false);
+        }
+
       } else {
-        // SIGNUP LOGIC
+        // SIGNUP
         userCredential = await FirebaseAuth.instance.createUserWithEmailAndPassword(
-          email: email, 
+          email: email,
           password: password
         );
         await userCredential.user?.updateDisplayName(name);
@@ -111,7 +214,6 @@ class _AuthScreenState extends ConsumerState<AuthScreen> with SingleTickerProvid
         SnackBar(content: Text(isLogin ? "Login Successful 🎉" : "Account Created Successfully! 🎉")),
       );
 
-      // Navigate
       Navigator.of(context).pushAndRemoveUntil(
         MaterialPageRoute(builder: (_) => HomeScreen(username: displayName)),
         (route) => false,
@@ -124,7 +226,7 @@ class _AuthScreenState extends ConsumerState<AuthScreen> with SingleTickerProvid
       else if (e.code == 'weak-password') message = 'The password provided is too weak.';
       else if (e.code == 'email-already-in-use') message = 'The account already exists for that email.';
       else if (e.code == 'invalid-email') message = 'The email address is invalid.';
-      
+
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(message), backgroundColor: Colors.red),
       );
@@ -139,12 +241,11 @@ class _AuthScreenState extends ConsumerState<AuthScreen> with SingleTickerProvid
 
   @override
   Widget build(BuildContext context) {
-    // Streetwear Palette
     const bgCream = Color(0xFFEFF3E6);
     const cardDark = Color(0xFF181816);
 
     return Scaffold(
-      backgroundColor: cardDark, // Top half is dark
+      backgroundColor: cardDark,
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
@@ -156,7 +257,6 @@ class _AuthScreenState extends ConsumerState<AuthScreen> with SingleTickerProvid
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // 1. Header Section
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
             child: Column(
@@ -184,7 +284,6 @@ class _AuthScreenState extends ConsumerState<AuthScreen> with SingleTickerProvid
           ),
           const SizedBox(height: 30),
 
-          // 2. Main Card Section
           Expanded(
             child: Container(
               width: double.infinity,
@@ -224,7 +323,7 @@ class _AuthScreenState extends ConsumerState<AuthScreen> with SingleTickerProvid
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           if (!isLogin) ...[
-                             _buildLabel("Full Name"),
+                            _buildLabel("Full Name"),
                             _buildTextField(
                               controller: nameController,
                               hint: "Enter Full Name",
@@ -249,24 +348,43 @@ class _AuthScreenState extends ConsumerState<AuthScreen> with SingleTickerProvid
                             icon: Icons.lock_outline,
                             isPassword: true,
                           ),
-                          
+
                           if (isLogin) ...[
                             const SizedBox(height: 15),
                             Row(
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
-                                Row(
-                                  children: [
-                                    Icon(Icons.check_box_outline_blank, size: 20, color: cardDark.withOpacity(0.5)),
-                                    const SizedBox(width: 8),
-                                    Text("Remember me", style: TextStyle(color: cardDark.withOpacity(0.6))),
-                                  ],
+                                // --- REMEMBER ME BUTTON ---
+                                GestureDetector(
+                                  onTap: () {
+                                    setState(() {
+                                      rememberMe = !rememberMe;
+                                    });
+                                  },
+                                  child: Row(
+                                    children: [
+                                      Icon(
+                                        rememberMe ? Icons.check_box : Icons.check_box_outline_blank,
+                                        size: 20,
+                                        color: cardDark
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Text("Remember me", style: TextStyle(color: cardDark.withOpacity(0.6))),
+                                    ],
+                                  ),
                                 ),
-                                Text(
-                                  "Forgot Password",
-                                  style: TextStyle(
-                                    color: cardDark.withOpacity(0.6),
-                                    fontWeight: FontWeight.w600,
+
+                                // --- FORGOT PASSWORD BUTTON ---
+                                GestureDetector(
+                                  onTap: () {
+                                    Navigator.push(context, MaterialPageRoute(builder: (_) => const ForgotPasswordScreen()));
+                                  },
+                                  child: Text(
+                                    "Forgot Password",
+                                    style: TextStyle(
+                                      color: cardDark.withOpacity(0.6),
+                                      fontWeight: FontWeight.w600,
+                                    ),
                                   ),
                                 ),
                               ],
@@ -276,7 +394,7 @@ class _AuthScreenState extends ConsumerState<AuthScreen> with SingleTickerProvid
                       ),
                     ),
 
-                    const SizedBox(height: 40),
+                    const SizedBox(height: 30),
 
                     // --- MAIN ACTION BUTTON ---
                     SizedBox(
@@ -294,8 +412,8 @@ class _AuthScreenState extends ConsumerState<AuthScreen> with SingleTickerProvid
                         ),
                         child: isLoading
                             ? const SizedBox(
-                                height: 24, 
-                                width: 24, 
+                                height: 24,
+                                width: 24,
                                 child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)
                               )
                             : Text(
@@ -308,10 +426,48 @@ class _AuthScreenState extends ConsumerState<AuthScreen> with SingleTickerProvid
                               ),
                       ),
                     ),
-                    
+
                     const SizedBox(height: 20),
-                    
-                    // Bottom Text
+
+                    // --- DIVIDER OR ---
+                    Row(
+                      children: [
+                        Expanded(child: Divider(color: cardDark.withOpacity(0.2))),
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 10),
+                          child: Text("OR", style: TextStyle(color: cardDark.withOpacity(0.4))),
+                        ),
+                        Expanded(child: Divider(color: cardDark.withOpacity(0.2))),
+                      ],
+                    ),
+                    const SizedBox(height: 20),
+
+                    // --- GOOGLE BUTTON ---
+                    SizedBox(
+                      width: double.infinity,
+                      height: 55,
+                      child: OutlinedButton.icon(
+                        onPressed: isLoading ? null : _handleGoogleSignIn,
+                        icon: const Icon(Icons.g_mobiledata, size: 30, color: Colors.black), // Using generic Icon, replace with Image.asset if you have png
+                        label: const Text(
+                          "Continue with Google",
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                            color: cardDark,
+                          ),
+                        ),
+                        style: OutlinedButton.styleFrom(
+                          side: BorderSide(color: cardDark.withOpacity(0.2)),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(16),
+                          ),
+                        ),
+                      ),
+                    ),
+
+                    const SizedBox(height: 20),
+
                     Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
@@ -342,7 +498,6 @@ class _AuthScreenState extends ConsumerState<AuthScreen> with SingleTickerProvid
     );
   }
 
-  // Helper: Toggle Button
   Widget _buildToggleBtn(String text, bool isBtnLogin, Color activeColor, Color inactiveColor) {
     final bool isActive = isLogin == isBtnLogin;
     return Expanded(
@@ -370,7 +525,6 @@ class _AuthScreenState extends ConsumerState<AuthScreen> with SingleTickerProvid
     );
   }
 
-  // Helper: Label
   Widget _buildLabel(String text) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 8, left: 4),
@@ -385,7 +539,6 @@ class _AuthScreenState extends ConsumerState<AuthScreen> with SingleTickerProvid
     );
   }
 
-  // Helper: Input Field
   Widget _buildTextField({
     required TextEditingController controller,
     required String hint,
@@ -418,6 +571,207 @@ class _AuthScreenState extends ConsumerState<AuthScreen> with SingleTickerProvid
                   onPressed: () => setState(() => isPasswordVisible = !isPasswordVisible),
                 )
               : null,
+          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+        ),
+      ),
+    );
+  }
+}
+
+// ==========================================
+// 2. FORGOT PASSWORD SCREEN
+// ==========================================
+
+class ForgotPasswordScreen extends StatefulWidget {
+  const ForgotPasswordScreen({Key? key}) : super(key: key);
+
+  @override
+  State<ForgotPasswordScreen> createState() => _ForgotPasswordScreenState();
+}
+
+class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
+  final emailController = TextEditingController();
+  bool isLoading = false;
+
+  Future<void> _handleReset() async {
+    final email = emailController.text.trim();
+    if (email.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Please enter your registered email")),
+      );
+      return;
+    }
+
+    setState(() => isLoading = true);
+
+    try {
+      await FirebaseAuth.instance.sendPasswordResetEmail(email: email);
+      if (!mounted) return;
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("Reset link sent! Check your email (and spam)."),
+          backgroundColor: Colors.green,
+        ),
+      );
+      Navigator.pop(context); // Go back to login
+    } on FirebaseAuthException catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.message ?? "Error"), backgroundColor: Colors.red),
+      );
+    } finally {
+      if (mounted) setState(() => isLoading = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    const bgCream = Color(0xFFEFF3E6);
+    const cardDark = Color(0xFF181816);
+
+    return Scaffold(
+      backgroundColor: cardDark,
+      appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_ios_new, color: Colors.white),
+          onPressed: () => Navigator.pop(context),
+        ),
+      ),
+      body: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // HEADER
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  "Forgot Password?",
+                  style: TextStyle(
+                    fontSize: 32,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white,
+                    letterSpacing: -0.5,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  "Don't worry! It happens. Please enter the address associated with your account.",
+                  style: TextStyle(
+                    fontSize: 16,
+                    color: Colors.white.withOpacity(0.6),
+                    height: 1.4,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 30),
+
+          // BOTTOM CARD
+          Expanded(
+            child: Container(
+              width: double.infinity,
+              decoration: const BoxDecoration(
+                color: bgCream,
+                borderRadius: BorderRadius.only(
+                  topLeft: Radius.circular(40),
+                  topRight: Radius.circular(40),
+                ),
+              ),
+              child: SingleChildScrollView(
+                physics: const BouncingScrollPhysics(),
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const SizedBox(height: 20),
+                    _buildLabel("Email ID"),
+                    _buildTextField(
+                      controller: emailController,
+                      hint: "Enter your email",
+                      icon: Icons.email_outlined,
+                    ),
+                    const SizedBox(height: 40),
+
+                    // SEND BUTTON
+                    SizedBox(
+                      width: double.infinity,
+                      height: 60,
+                      child: ElevatedButton(
+                        onPressed: isLoading ? null : _handleReset,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: cardDark,
+                          foregroundColor: Colors.white,
+                          elevation: 0,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(16),
+                          ),
+                        ),
+                        child: isLoading
+                            ? const SizedBox(
+                                height: 24,
+                                width: 24,
+                                child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)
+                              )
+                            : const Text(
+                                "Send Reset Link",
+                                style: TextStyle(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.bold,
+                                  letterSpacing: 0.5,
+                                ),
+                              ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // Helper widgets specifically for ForgotPassword Screen
+  Widget _buildLabel(String text) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8, left: 4),
+      child: Text(
+        text,
+        style: TextStyle(
+          fontSize: 14,
+          fontWeight: FontWeight.w600,
+          color: const Color(0xFF181816).withOpacity(0.7),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTextField({
+    required TextEditingController controller,
+    required String hint,
+    required IconData icon,
+  }) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.black12),
+      ),
+      child: TextField(
+        controller: controller,
+        keyboardType: TextInputType.emailAddress,
+        style: const TextStyle(color: Colors.black87),
+        decoration: InputDecoration(
+          hintText: hint,
+          hintStyle: const TextStyle(color: Colors.black38),
+          border: InputBorder.none,
+          prefixIcon: Icon(icon, color: Colors.black54),
           contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
         ),
       ),
