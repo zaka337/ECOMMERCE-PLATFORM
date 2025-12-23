@@ -18,12 +18,47 @@ void main() async {
   runApp(const ProviderScope(child: AZMartApp()));
 }
 
-class AZMartApp extends ConsumerWidget {
+class AZMartApp extends ConsumerStatefulWidget {
   const AZMartApp({Key? key}) : super(key: key);
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<AZMartApp> createState() => _AZMartAppState();
+}
+
+class _AZMartAppState extends ConsumerState<AZMartApp> {
+  bool _isInitialized = false;
+
+  @override
+  void initState() {
+    super.initState();
+    // Initialize auth state on app startup
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      ref.read(authStateProvider.notifier).initializeAuth().then((_) {
+        if (mounted) {
+          setState(() {
+            _isInitialized = true;
+          });
+        }
+      });
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final authState = ref.watch(authStateProvider);
+    
+    // Show loading screen while initializing auth
+    if (!_isInitialized) {
+      return MaterialApp(
+        debugShowCheckedModeBanner: false,
+        home: Scaffold(
+          backgroundColor: const Color(0xFFF9F5EB),
+          body: Center(
+            child: CircularProgressIndicator(),
+          ),
+        ),
+      );
+    }
     
     // Check login state (Default to false/Guest if null)
     final bool isLoggedIn = authState['isLoggedIn'] ?? false;

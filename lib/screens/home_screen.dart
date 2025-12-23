@@ -1,10 +1,17 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/products_provider.dart';
+import '../providers/auth_provider.dart';
+import '../providers/store_provider.dart';
 import '../models/product.dart';
 // Ensure these imports point to your actual files
-import 'product_detail_screen.dart'; 
-import 'cart_screen.dart'; 
+import 'settings_screen.dart';
+import 'fashion_category_screen.dart';
+import 'product_detail_screen.dart';
+import 'cart_screen.dart';
+import 'auth_screen.dart';
+import 'store_registration_screen.dart';
+import 'store_dashboard_screen.dart';
 
 class HomeScreen extends ConsumerStatefulWidget {
   final String username;
@@ -16,258 +23,98 @@ class HomeScreen extends ConsumerStatefulWidget {
 }
 
 class _HomeScreenState extends ConsumerState<HomeScreen> {
-  // --- CLASSICAL THEME COLORS ---
-  static const bgParchment = Color(0xFFF9F5EB); 
-  static const bgCard = Color(0xFFFDFBF7);      
-  static const textInk = Color(0xFF2C221C);     
-  static const accentGold = Color(0xFFC5A059);  
-  static const accentBurgundy = Color(0xFF7B1E1E); 
-  static const frameBorder = Color(0xFFD4C5A5); 
+  // --- MODERN THEME COLORS ---
+  static const colorBackground = Color(0xFFF5F5F7); // Light Grey/White background
+  static const colorDarkGreen = Color(0xFF1E3A34);  // The main card color
+  static const colorBlack = Color(0xFF000000);
+  static const colorWhite = Color(0xFFFFFFFF);
 
   // --- TYPOGRAPHY ---
-  static const serifStyle = TextStyle(fontFamily: 'Times New Roman', package: null);
+  static const modernStyle = TextStyle(
+    fontFamily: 'Arial', // Use your app's font
+    color: colorBlack,
+    letterSpacing: 0.5,
+  );
 
   @override
   void initState() {
     super.initState();
-    // Fetch products when screen loads
-    Future.microtask(() => ref.read(productsProvider.notifier).fetchProducts());
+    // We still fetch products to display them, but we don't edit them.
+    Future.microtask(() {
+      ref.read(productsProvider.notifier).fetchProducts();
+      // Load user's store if they are a store owner
+      ref.read(storeProvider.notifier).loadUserStore();
+    });
   }
 
-  // --- DIALOG: CREATE / EDIT PRODUCT ---
-  void _showProductDialog(BuildContext context, {Product? existingProduct}) {
-    final isEditing = existingProduct != null;
-    final nameController = TextEditingController(text: existingProduct?.name ?? '');
-    final priceController = TextEditingController(text: existingProduct?.price.toString() ?? '');
-    final descController = TextEditingController(text: existingProduct?.description ?? '');
-    final imageController = TextEditingController(text: existingProduct?.imageUrl ?? '');
-    bool isLoading = false;
-
-    showDialog(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (context, setDialogState) => AlertDialog(
-          backgroundColor: bgParchment,
-          shape: BeveledRectangleBorder(
-            side: const BorderSide(color: accentGold, width: 2),
-            borderRadius: BorderRadius.circular(2),
-          ),
-          title: Column(
-            children: [
-              Text(
-                isEditing ? 'AMEND LEDGER' : 'NEW ACQUISITION',
-                style: serifStyle.copyWith(
-                  color: accentBurgundy,
-                  fontWeight: FontWeight.bold,
-                  letterSpacing: 2.0,
-                  fontSize: 18,
-                ),
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 8),
-              const Divider(color: accentGold, thickness: 1, indent: 40, endIndent: 40),
-            ],
-          ),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                _buildVintageTextField(nameController, 'Artifact Name'),
-                const SizedBox(height: 12),
-                _buildVintageTextField(priceController, 'Value (Gold Coins)', isNumber: true),
-                const SizedBox(height: 12),
-                _buildVintageTextField(descController, 'Description / History'),
-                const SizedBox(height: 12),
-                _buildVintageTextField(imageController, 'Visual Reference (URL)'),
-              ],
-            ),
-          ),
-          actionsAlignment: MainAxisAlignment.center,
-          actions: [
-            if (!isLoading)
-              TextButton(
-                onPressed: () => Navigator.of(ctx).pop(),
-                child: Text('DISCARD', style: serifStyle.copyWith(color: textInk)),
-              ),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: accentBurgundy,
-                foregroundColor: bgParchment,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
-              ),
-              onPressed: isLoading ? null : () async {
-                // Validation with user feedback
-                if (nameController.text.trim().isEmpty) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text('Please enter an artifact name', style: serifStyle),
-                      backgroundColor: accentBurgundy,
-                    ),
-                  );
-                  return;
-                }
-
-                if (priceController.text.trim().isEmpty) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text('Please enter a value', style: serifStyle),
-                      backgroundColor: accentBurgundy,
-                    ),
-                  );
-                  return;
-                }
-
-                final priceValue = double.tryParse(priceController.text.trim());
-                if (priceValue == null || priceValue <= 0) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text('Please enter a valid price', style: serifStyle),
-                      backgroundColor: accentBurgundy,
-                    ),
-                  );
-                  return;
-                }
-
-                setDialogState(() {
-                  isLoading = true;
-                });
-
-                try {
-                  final product = Product(
-                    id: existingProduct?.id ?? '', // ID handled by provider for new items
-                    name: nameController.text.trim(),
-                    description: descController.text.trim(),
-                    price: priceValue,
-                    imageUrl: imageController.text.trim(),
-                  );
-
-                  if (isEditing) {
-                    await ref.read(productsProvider.notifier).updateProduct(product.id, product);
-                    if (context.mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text('Record updated successfully', style: serifStyle),
-                          backgroundColor: accentGold,
-                        ),
-                      );
-                    }
-                  } else {
-                    await ref.read(productsProvider.notifier).addProduct(product);
-                    if (context.mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text('New entry recorded successfully', style: serifStyle),
-                          backgroundColor: accentGold,
-                        ),
-                      );
-                    }
-                  }
-
-                  if (context.mounted) {
-                    Navigator.of(ctx).pop();
-                  }
-                } catch (e) {
-                  setDialogState(() {
-                    isLoading = false;
-                  });
-                  
-                  if (context.mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text(
-                          'Error: ${e.toString().replaceAll('Exception: ', '')}',
-                          style: serifStyle,
-                        ),
-                        backgroundColor: accentBurgundy,
-                        duration: const Duration(seconds: 4),
-                      ),
-                    );
-                  }
-                }
-              },
-              child: isLoading
-                  ? SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        valueColor: AlwaysStoppedAnimation<Color>(bgParchment),
-                      ),
-                    )
-                  : Text(
-                      isEditing ? 'UPDATE RECORD' : 'RECORD ENTRY',
-                      style: serifStyle.copyWith(fontWeight: FontWeight.bold),
-                    ),
-            ),
-          ],
-        ),
-      ),
-    );
+  // --- NAVIGATION MENU LOGIC ---
+ void _handleMenuSelection(String value) {
+    switch (value) {
+      case 'Cart':
+        Navigator.push(context, MaterialPageRoute(builder: (_) => const CartScreen()));
+        break;
+      
+      case 'My Store':
+        final store = ref.read(storeProvider);
+        if (store != null) {
+          Navigator.push(context, MaterialPageRoute(builder: (_) => const StoreDashboardScreen()));
+        } else {
+          Navigator.push(context, MaterialPageRoute(builder: (_) => const StoreRegistrationScreen()));
+        }
+        break;
+      
+      case 'Create Store':
+        Navigator.push(context, MaterialPageRoute(builder: (_) => const StoreRegistrationScreen()));
+        break;
+      
+      case 'Men':
+        Navigator.push(context, MaterialPageRoute(builder: (_) => const FashionCategoryScreen(
+          title: "MEN'S",
+          categories: ['Jackets', 'Shoes', 'Perfumes', 'Suits', 'Accessories'],
+        )));
+        break;
+      
+      case 'Women':
+        Navigator.push(context, MaterialPageRoute(builder: (_) => const FashionCategoryScreen(
+          title: "WOMEN'S",
+          categories: ['Jewelry', 'Jackets', 'Western', 'Bags', 'Footwear'],
+        )));
+        break;
+      
+      case 'Settings':
+        // Navigate to the new Settings Screen
+        Navigator.push(context, MaterialPageRoute(builder: (_) => SettingsScreen(username: widget.username)));
+        break;
+      
+      case 'Logout':
+        _confirmLogout();
+        break;
+    }
   }
 
-  // --- HELPER: VINTAGE INPUT ---
-  Widget _buildVintageTextField(TextEditingController controller, String label, {bool isNumber = false}) {
-    return TextField(
-      controller: controller,
-      keyboardType: isNumber ? TextInputType.number : TextInputType.text,
-      style: serifStyle.copyWith(color: textInk),
-      decoration: InputDecoration(
-        labelText: label,
-        labelStyle: serifStyle.copyWith(color: textInk.withOpacity(0.6)),
-        enabledBorder: const UnderlineInputBorder(borderSide: BorderSide(color: frameBorder)),
-        focusedBorder: const UnderlineInputBorder(borderSide: BorderSide(color: accentBurgundy)),
-        contentPadding: const EdgeInsets.symmetric(vertical: 4),
-        isDense: true,
-      ),
-    );
-  }
 
-  // --- DELETE CONFIRMATION ---
-  void _confirmDelete(BuildContext context, String productId) {
-    showDialog(
+  Future<void> _confirmLogout() async {
+    final shouldLogout = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: bgParchment,
-        title: Text('Dispose Artifact?', style: serifStyle.copyWith(color: textInk)),
-        content: Text('This action acts as an expungement from the archives.', style: serifStyle.copyWith(color: textInk)),
+        title: const Text('Sign Out'),
+        content: const Text('Are you sure you want to sign out?'),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(),
-            child: Text('KEEP', style: serifStyle.copyWith(color: textInk)),
-          ),
-          TextButton(
-            onPressed: () async {
-              try {
-                await ref.read(productsProvider.notifier).deleteProduct(productId);
-                if (context.mounted) {
-                  Navigator.of(ctx).pop();
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text('Artifact expunged from archives', style: serifStyle),
-                      backgroundColor: accentGold,
-                    ),
-                  );
-                }
-              } catch (e) {
-                if (context.mounted) {
-                  Navigator.of(ctx).pop();
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text(
-                        'Error: ${e.toString().replaceAll('Exception: ', '')}',
-                        style: serifStyle,
-                      ),
-                      backgroundColor: accentBurgundy,
-                    ),
-                  );
-                }
-              }
-            },
-            child: Text('EXPUNGE', style: serifStyle.copyWith(color: accentBurgundy, fontWeight: FontWeight.bold)),
-          ),
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Logout', style: TextStyle(color: Colors.red))),
         ],
       ),
     );
+
+    if (shouldLogout == true) {
+      await ref.read(authStateProvider.notifier).logout();
+      if (context.mounted) {
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(builder: (_) => const AuthScreen(initialIsLogin: true)),
+          (route) => false,
+        );
+      }
+    }
   }
 
   @override
@@ -275,282 +122,272 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     final products = ref.watch(productsProvider);
 
     return Scaffold(
-      backgroundColor: bgParchment,
+      backgroundColor: colorBackground,
       
       // --- APP BAR ---
       appBar: AppBar(
         elevation: 0,
-        backgroundColor: bgParchment,
-        centerTitle: true,
-        leading: IconButton(
-          icon: const Icon(Icons.menu, color: textInk),
-          onPressed: () {},
-        ),
-        title: Column(
-          children: [
-            Text(
-              'THE EMPORIUM',
-              style: serifStyle.copyWith(
-                color: textInk,
-                fontSize: 22,
-                fontWeight: FontWeight.bold,
-                letterSpacing: 3.0,
-              ),
-            ),
-            const SizedBox(height: 4),
-            Container(height: 1, width: 60, color: accentGold),
-            Container(margin: const EdgeInsets.only(top: 2), height: 1, width: 40, color: accentGold),
-          ],
+        backgroundColor: colorBackground,
+        automaticallyImplyLeading: false, 
+        title: Text(
+          'COTUR',
+          style: modernStyle.copyWith(
+            fontSize: 24,
+            fontWeight: FontWeight.w900,
+            fontStyle: FontStyle.italic,
+            color: colorBlack,
+          ),
         ),
         actions: [
-          Padding(
-            padding: const EdgeInsets.only(right: 16.0),
-            child: IconButton(
-              icon: const Icon(Icons.shopping_bag_outlined, color: textInk),
-              onPressed: () {
-                 Navigator.push(context, MaterialPageRoute(builder: (_) => const CartScreen()));
-              },
+          // Custom Menu Button
+          PopupMenuButton<String>(
+            offset: const Offset(0, 50),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+            icon: Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                border: Border.all(color: colorBlack, width: 1.5),
+              ),
+              child: const Icon(Icons.sort, color: colorBlack, size: 20),
             ),
+            onSelected: _handleMenuSelection,
+            itemBuilder: (BuildContext context) {
+              final store = ref.read(storeProvider);
+              final menuItems = <String>['Cart'];
+              
+              // Add store-related menu item
+              if (store != null) {
+                menuItems.add('My Store');
+              } else {
+                menuItems.add('Create Store');
+              }
+              
+              menuItems.addAll(['Men', 'Women', 'Settings', 'Logout']);
+              
+              return menuItems.map((String choice) {
+                return PopupMenuItem<String>(
+                  value: choice,
+                  child: Text(choice, style: modernStyle),
+                );
+              }).toList();
+            },
           ),
+          const SizedBox(width: 16),
         ],
       ),
 
-      // --- FLOATING ACTION BUTTON (NEW FEATURE) ---
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => _showProductDialog(context),
-        backgroundColor: accentBurgundy,
-        foregroundColor: bgParchment,
-        // FIXED: Using standard 'Icons.edit' because 'Icons.edit_quill' is missing
-        icon: const Icon(Icons.edit), 
-        label: Text("NEW ENTRY", style: serifStyle.copyWith(fontWeight: FontWeight.bold, letterSpacing: 1)),
-        shape: BeveledRectangleBorder(borderRadius: BorderRadius.circular(10)),
-      ),
+      // NO FloatingActionButton (CRUD Removed)
 
-      body: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // --- GREETING ---
-            Center(
-              child: Text(
-                'Est. 2024 • Greetings, ${widget.username}',
-                style: serifStyle.copyWith(
-                  color: textInk.withOpacity(0.6),
-                  fontSize: 14,
-                  fontStyle: FontStyle.italic,
-                  letterSpacing: 1.0,
-                ),
-              ),
-            ),
-            const SizedBox(height: 20),
-
-            // --- HERO BANNER ---
-            Container(
-              height: 140,
-              width: double.infinity,
-              decoration: BoxDecoration(
-                color: const Color(0xFFEBE3D5),
-                border: Border.all(color: accentGold, width: 1),
-                borderRadius: BorderRadius.circular(2),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withOpacity(0.05),
-                    offset: const Offset(4, 4),
-                    blurRadius: 10,
-                  )
-                ],
-              ),
-              child: Stack(
-                children: [
-                  Positioned(top: 8, left: 8, child: _CornerOrnament(color: accentGold)),
-                  Positioned(top: 8, right: 8, child: RotatedBox(quarterTurns: 1, child: _CornerOrnament(color: accentGold))),
-                  Positioned(bottom: 8, left: 8, child: RotatedBox(quarterTurns: 3, child: _CornerOrnament(color: accentGold))),
-                  Positioned(bottom: 8, right: 8, child: RotatedBox(quarterTurns: 2, child: _CornerOrnament(color: accentGold))),
-
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 12.0),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Text(
-                                'ROYAL SELECTION',
-                                style: serifStyle.copyWith(
-                                  color: accentBurgundy,
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 10,
-                                  letterSpacing: 2,
-                                ),
-                              ),
-                              const SizedBox(height: 4),
-                              Text(
-                                'Grand Opening\nSale Event',
-                                style: serifStyle.copyWith(
-                                  fontSize: 20,
-                                  color: textInk,
-                                  height: 1.1,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                              const SizedBox(height: 8),
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                                decoration: BoxDecoration(border: Border.all(color: textInk)),
-                                child: Text(
-                                  "VIEW COLLECTION",
-                                  style: serifStyle.copyWith(fontSize: 9, fontWeight: FontWeight.bold),
-                                ),
-                              )
-                            ],
-                          ),
-                        ),
-                        // Placeholder Icon
-                        Container(
-                          width: 80,
-                          height: 90,
-                          decoration: BoxDecoration(
-                            border: Border.all(color: Colors.white, width: 3),
-                            boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius: 5)],
-                            color: Colors.grey[300],
-                          ),
-                          child: const Icon(Icons.diamond_outlined, size: 40, color: Colors.grey),
-                        ),
-                      ],
-                    ),
+      body: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const SizedBox(height: 10),
+          
+          // --- HEADER SECTION (Fashion Beyond Reality) ---
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20.0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  "FASHION",
+                  style: modernStyle.copyWith(
+                    fontSize: MediaQuery.of(context).size.width * 0.09, // Responsive
+                    fontWeight: FontWeight.w300,
                   ),
-                ],
-              ),
+                ),
+                Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(6),
+                      decoration: const BoxDecoration(
+                        color: colorBlack,
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(Icons.arrow_outward, color: Colors.white, size: 20),
+                    ),
+                    const SizedBox(width: 10),
+                    Flexible(
+                      child: Text(
+                        "BEYOND",
+                        style: modernStyle.copyWith(
+                          fontSize: MediaQuery.of(context).size.width * 0.09, // Responsive
+                          fontWeight: FontWeight.bold,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                ),
+                Text(
+                  "REALITY",
+                  style: modernStyle.copyWith(
+                    fontSize: MediaQuery.of(context).size.width * 0.09, // Responsive
+                    fontWeight: FontWeight.w300,
+                  ),
+                ),
+              ],
             ),
+          ),
 
-            const SizedBox(height: 20),
+          const SizedBox(height: 20),
 
-            // --- PRODUCT GRID ---
-            Expanded(
-              child: products.isEmpty 
-              ? Center(child: Text("The archives are empty...", style: serifStyle.copyWith(color: textInk.withOpacity(0.5))))
-              : GridView.builder(
-                padding: const EdgeInsets.only(bottom: 80), // Space for FAB
-                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: 2,
-                  mainAxisSpacing: 20,
-                  crossAxisSpacing: 20,
-                  childAspectRatio: 0.60,
+          // --- PRODUCT LIST ---
+          Expanded(
+            child: products.isEmpty 
+            ? Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(40),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.shopping_bag_outlined, size: 60, color: colorBlack.withOpacity(0.3)),
+                      const SizedBox(height: 16),
+                      Text(
+                        "No products available",
+                        style: modernStyle.copyWith(
+                          color: colorBlack.withOpacity(0.5),
+                          fontSize: 16,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              )
+            : ListView.builder(
+                padding: EdgeInsets.fromLTRB(
+                  20,
+                  0,
+                  20,
+                  MediaQuery.of(context).padding.bottom + 40,
                 ),
                 itemCount: products.length,
                 itemBuilder: (context, index) {
                   final product = products[index];
-                  return GestureDetector(
-                    onTap: () {
-                      Navigator.push(
-                        context, 
-                        MaterialPageRoute(builder: (_) => ProductDetailScreen(product: product))
-                      );
-                    },
-                    child: Container(
-                      decoration: BoxDecoration(
-                        color: bgCard,
-                        border: Border.all(color: frameBorder, width: 1),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.brown.withOpacity(0.05),
-                            offset: const Offset(3, 3),
-                            blurRadius: 6,
-                          )
-                        ],
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          // Frame Image
-                          Expanded(
-                            flex: 3,
-                            child: Container(
-                              margin: const EdgeInsets.all(8),
-                              decoration: BoxDecoration(
-                                border: Border.all(color: accentGold.withOpacity(0.3)),
-                                color: Colors.white,
-                              ),
-                              child: Image.network(
-                                product.imageUrl,
-                                fit: BoxFit.cover,
-                                errorBuilder: (c, e, s) => const Center(
-                                  child: Icon(Icons.broken_image, color: frameBorder),
-                                ),
-                              ),
-                            ),
-                          ),
-                          // Frame Details
-                          Expanded(
-                            flex: 2,
-                            child: Padding(
-                              padding: const EdgeInsets.symmetric(horizontal: 8.0),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.center,
-                                children: [
-                                  Text(
-                                    product.name.toUpperCase(),
-                                    textAlign: TextAlign.center,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: serifStyle.copyWith(
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.bold,
-                                      letterSpacing: 1.0,
-                                      color: textInk,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 4),
-                                  Text(
-                                    "No. ${product.id.substring(0, product.id.length > 4 ? 4 : product.id.length)}",
-                                    style: serifStyle.copyWith(
-                                      fontSize: 10,
-                                      color: textInk.withOpacity(0.5),
-                                      fontStyle: FontStyle.italic,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 4),
-                                  Text(
-                                    '\$${product.price.toStringAsFixed(2)}',
-                                    style: serifStyle.copyWith(
-                                      color: accentBurgundy,
-                                      fontSize: 16,
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                  ),
-                                  const Spacer(),
-                                  // --- EDIT / DELETE ACTIONS ---
-                                  Row(
-                                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                                    children: [
-                                      IconButton(
-                                        icon: const Icon(Icons.edit, size: 18, color: textInk),
-                                        onPressed: () => _showProductDialog(context, existingProduct: product),
-                                        padding: EdgeInsets.zero,
-                                        constraints: const BoxConstraints(),
-                                      ),
-                                      Container(width: 1, height: 12, color: frameBorder),
-                                      IconButton(
-                                        icon: const Icon(Icons.delete_outline, size: 18, color: accentBurgundy),
-                                        onPressed: () => _confirmDelete(context, product.id),
-                                        padding: EdgeInsets.zero,
-                                        constraints: const BoxConstraints(),
-                                      ),
-                                    ],
-                                  ),
-                                  const SizedBox(height: 8),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  );
+                  return _buildModernProductCard(product);
                 },
+              ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // --- WIDGET: THE MODERN CARD (Display Only) ---
+  Widget _buildModernProductCard(Product product) {
+    return GestureDetector(
+      onTap: () {
+        // Navigate to Product Detail
+        Navigator.push(
+          context, 
+          MaterialPageRoute(builder: (_) => ProductDetailScreen(product: product))
+        );
+      },
+      child: Container(
+        height: MediaQuery.of(context).size.height * 0.5, // Responsive height
+        constraints: const BoxConstraints(minHeight: 300, maxHeight: 450),
+        margin: const EdgeInsets.only(bottom: 20),
+        decoration: BoxDecoration(
+          color: colorDarkGreen,
+          borderRadius: BorderRadius.circular(30),
+        ),
+        child: Stack(
+          children: [
+            // 1. PRODUCT TITLE (Top Left)
+            Positioned(
+              top: 20,
+              left: 20,
+              right: 70,
+              child: Text(
+                product.name.toUpperCase(),
+                style: modernStyle.copyWith(
+                  color: Colors.white,
+                  fontSize: MediaQuery.of(context).size.width * 0.04,
+                  fontWeight: FontWeight.w400,
+                  letterSpacing: 1.0,
+                ),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+
+            // 2. MAIN IMAGE (Centered/Bottom-ish)
+            Positioned(
+              top: 60,
+              left: 50, // Leave space for rotated price
+              right: 0,
+              bottom: 0,
+              child: ClipRRect(
+                borderRadius: const BorderRadius.only(bottomRight: Radius.circular(30)),
+                child: Image.network(
+                  product.imageUrl,
+                  fit: BoxFit.cover,
+                  errorBuilder: (c, e, s) => const Center(child: Icon(Icons.image_not_supported, color: Colors.white24, size: 50)),
+                ),
+              ),
+            ),
+
+            // 3. ROTATED PRICE (Left Side)
+            Positioned(
+              left: 15,
+              bottom: 80,
+              child: RotatedBox(
+                quarterTurns: 3, // Rotate 270 degrees
+                child: Text(
+                  '\$${product.price.toStringAsFixed(2)}',
+                  style: modernStyle.copyWith(
+                    color: Colors.white,
+                    fontSize: MediaQuery.of(context).size.width * 0.07,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 1.5,
+                  ),
+                ),
+              ),
+            ),
+
+            // 4. "DETAILS" CIRCLE BUTTON (Bottom Center overlay)
+            Positioned(
+              bottom: 20,
+              left: 0,
+              right: 0,
+              child: Center(
+                child: Container(
+                  width: 65,
+                  height: 65,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFEBEBEB), // Slightly off-white
+                    shape: BoxShape.circle,
+                    boxShadow: [
+                      BoxShadow(color: Colors.black.withOpacity(0.2), blurRadius: 10, offset: const Offset(0,5))
+                    ]
+                  ),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.arrow_outward, size: MediaQuery.of(context).size.width * 0.05, color: Colors.black),
+                      const SizedBox(height: 2),
+                      Text("Details", style: modernStyle.copyWith(fontSize: 9, fontWeight: FontWeight.bold)),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+
+            // 5. DECORATIVE TAG (Optional "Yellow" tag from image)
+            Positioned(
+              top: 70,
+              left: 50,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.2),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Text(
+                  "Collection",
+                  style: modernStyle.copyWith(color: Colors.white, fontSize: 10),
+                ),
               ),
             ),
           ],
@@ -558,44 +395,4 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       ),
     );
   }
-}
-
-// --- HELPER: CORNER ORNAMENT ---
-class _CornerOrnament extends StatelessWidget {
-  final Color color;
-  const _CornerOrnament({required this.color});
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      width: 20,
-      height: 20,
-      child: CustomPaint(
-        painter: _OrnamentPainter(color: color),
-      ),
-    );
-  }
-}
-
-class _OrnamentPainter extends CustomPainter {
-  final Color color;
-  _OrnamentPainter({required this.color});
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = color
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.5;
-
-    final path = Path();
-    path.moveTo(0, size.height);
-    path.lineTo(0, 0);
-    path.lineTo(size.width, 0);
-    canvas.drawPath(path, paint);
-    canvas.drawCircle(const Offset(4, 4), 1, Paint()..color = color);
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }

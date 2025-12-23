@@ -2,13 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:google_sign_in/google_sign_in.dart'; // Import Google Sign In
+import 'package:google_sign_in/google_sign_in.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/services.dart'; // For PlatformException
 import '../providers/auth_provider.dart';
 import 'home_screen.dart';
 
-// ==========================================
-// 1. MAIN AUTH SCREEN (Login / Signup)
-// ==========================================
+// Google Sign-In Web Client ID
+const String? _googleSignInWebClientId = '711521421896-1k14oohlm8jguk3v6gt0kets7np17n4j.apps.googleusercontent.com';
 
 class AuthScreen extends ConsumerStatefulWidget {
   final bool initialIsLogin;
@@ -19,18 +20,15 @@ class AuthScreen extends ConsumerStatefulWidget {
 }
 
 class _AuthScreenState extends ConsumerState<AuthScreen> with SingleTickerProviderStateMixin {
-  // State
   late bool isLogin;
   bool isLoading = false;
   bool isPasswordVisible = false;
   bool rememberMe = false;
 
-  // Controllers
   final nameController = TextEditingController();
   final emailController = TextEditingController();
   final passController = TextEditingController();
 
-  // Animation
   late AnimationController _animationController;
   late Animation<double> _fadeAnimation;
 
@@ -38,11 +36,7 @@ class _AuthScreenState extends ConsumerState<AuthScreen> with SingleTickerProvid
   void initState() {
     super.initState();
     isLogin = widget.initialIsLogin;
-    
-    // Only load saved email if we are starting on the Login page
-    if (isLogin) {
-      _loadUserEmail();
-    }
+    if (isLogin) _loadUserEmail();
 
     _animationController = AnimationController(
       vsync: this,
@@ -61,18 +55,19 @@ class _AuthScreenState extends ConsumerState<AuthScreen> with SingleTickerProvid
     super.dispose();
   }
 
-  // --- REMEMBER ME LOGIC ---
-  void _loadUserEmail() async {
+  Future<void> _loadUserEmail() async {
     try {
       SharedPreferences prefs = await SharedPreferences.getInstance();
       String? savedEmail = prefs.getString('saved_email');
       bool? savedRememberMe = prefs.getBool('remember_me');
 
       if (isLogin && savedRememberMe == true && savedEmail != null) {
-        setState(() {
-          rememberMe = true;
-          emailController.text = savedEmail;
-        });
+        if (mounted) {
+          setState(() {
+            rememberMe = true;
+            emailController.text = savedEmail;
+          });
+        }
       }
     } catch (e) {
       debugPrint("Error loading user email: $e");
@@ -87,7 +82,14 @@ class _AuthScreenState extends ConsumerState<AuthScreen> with SingleTickerProvid
     });
 
     if (isLogin) {
+      nameController.clear();
+      passController.clear();
       _loadUserEmail();
+    } else {
+      nameController.clear();
+      emailController.clear();
+      passController.clear();
+      rememberMe = false;
     }
   }
 
@@ -96,53 +98,85 @@ class _AuthScreenState extends ConsumerState<AuthScreen> with SingleTickerProvid
     setState(() => isLoading = true);
 
     try {
-      // 1. Trigger the Google Authentication flow
-      final GoogleSignInAccount? googleUser = await GoogleSignIn().signIn();
+      if (kIsWeb && _googleSignInWebClientId == null) {
+        throw Exception("Google Client ID missing for Web. Check lib/screens/auth_screen.dart");
+      }
+
+      // 1. Configure Google Sign In
+      // Using only 'email' scope to avoid People API requirement
+      final GoogleSignIn googleSignIn = GoogleSignIn(
+        scopes: ['email'],
+        clientId: kIsWeb ? _googleSignInWebClientId : null,
+      );
+
+      // 2. Start interactive sign-in (always show account picker for fresh flow)
+      final GoogleSignInAccount? googleUser = await googleSignIn.signIn();
       
+      // User canceled the sign-in flow
       if (googleUser == null) {
-        // User canceled the sign-in
         setState(() => isLoading = false);
         return;
       }
 
-      // 2. Obtain the auth details from the request
+      // 4. Obtain auth details
       final GoogleSignInAuthentication googleAuth = await googleUser.authentication;
 
-      // 3. Create a new credential
+      if (googleAuth.accessToken == null && googleAuth.idToken == null) {
+        throw Exception("Missing Google Auth Tokens");
+      }
+
+      // 4. Create Credential
       final OAuthCredential credential = GoogleAuthProvider.credential(
         accessToken: googleAuth.accessToken,
         idToken: googleAuth.idToken,
       );
 
-      // 4. Sign in to Firebase with the credential
+      // 5. Sign in to Firebase
       final UserCredential userCredential = await FirebaseAuth.instance.signInWithCredential(credential);
+      final user = userCredential.user;
 
-      // 5. Update Riverpod
+      // 6. Update Riverpod State (CRITICAL FIX)
+      final username = user?.displayName ?? user?.email?.split('@')[0] ?? "User";
+      
       ref.read(authStateProvider.notifier).state = {
         'isLoggedIn': true,
-        'username': userCredential.user?.displayName ?? "Google User",
-        'uid': userCredential.user?.uid,
+        'username': username,
+        'uid': user?.uid,
       };
 
       if (!mounted) return;
 
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Google Sign-In Successful 🎉")),
+        const SnackBar(content: Text("Google Sign-In Successful 🎉"), backgroundColor: Colors.green),
       );
 
+      // 7. Navigate
       Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (_) => HomeScreen(username: userCredential.user?.displayName ?? "User")),
+        MaterialPageRoute(builder: (_) => HomeScreen(username: username)),
         (route) => false,
       );
 
     } on FirebaseAuthException catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(e.message ?? "Google Sign-In Failed"), backgroundColor: Colors.red),
-      );
+      _showError("Firebase Error: ${e.message}");
+    } on PlatformException catch (e) {
+      String errorMsg = "Platform Error: ${e.message}";
+      if (e.code == 'sign_in_failed') {
+        errorMsg = "Sign-in failed. Check SHA-1 in Firebase Console for Android.";
+      }
+      _showError(errorMsg);
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Error: $e"), backgroundColor: Colors.red),
-      );
+      String errorStr = e.toString();
+      // Check for People API error
+      if (errorStr.contains('People API') || errorStr.contains('people.googleapis.com')) {
+        _showError(
+          "People API not enabled.\n"
+          "Enable it here:\n"
+          "https://console.developers.google.com/apis/api/people.googleapis.com/overview?project=711521421896\n"
+          "Or the code will work with email-only (no profile info)."
+        );
+      } else {
+        _showError("Error: $e");
+      }
     } finally {
       if (mounted) setState(() => isLoading = false);
     }
@@ -155,16 +189,11 @@ class _AuthScreenState extends ConsumerState<AuthScreen> with SingleTickerProvid
     final name = nameController.text.trim();
 
     if (email.isEmpty || password.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Please fill all required fields")),
-      );
+      _showError("Please fill all required fields");
       return;
     }
-
     if (!isLogin && name.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Please enter your full name")),
-      );
+      _showError("Please enter your full name");
       return;
     }
 
@@ -182,7 +211,7 @@ class _AuthScreenState extends ConsumerState<AuthScreen> with SingleTickerProvid
         );
         displayName = userCredential.user?.displayName ?? "User";
 
-        // Save Email if "Remember Me" is checked
+        // Remember Me
         SharedPreferences prefs = await SharedPreferences.getInstance();
         if (rememberMe) {
           await prefs.setString('saved_email', email);
@@ -199,9 +228,11 @@ class _AuthScreenState extends ConsumerState<AuthScreen> with SingleTickerProvid
           password: password
         );
         await userCredential.user?.updateDisplayName(name);
+        await userCredential.user?.reload();
+        displayName = FirebaseAuth.instance.currentUser?.displayName ?? name;
       }
 
-      // Update Riverpod
+      // Update Riverpod State
       ref.read(authStateProvider.notifier).state = {
         'isLoggedIn': true,
         'username': displayName,
@@ -211,7 +242,7 @@ class _AuthScreenState extends ConsumerState<AuthScreen> with SingleTickerProvid
       if (!mounted) return;
 
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(isLogin ? "Login Successful 🎉" : "Account Created Successfully! 🎉")),
+        SnackBar(content: Text(isLogin ? "Login Successful 🎉" : "Account Created!"), backgroundColor: Colors.green),
       );
 
       Navigator.of(context).pushAndRemoveUntil(
@@ -220,23 +251,23 @@ class _AuthScreenState extends ConsumerState<AuthScreen> with SingleTickerProvid
       );
 
     } on FirebaseAuthException catch (e) {
-      String message = "An error occurred";
-      if (e.code == 'user-not-found') message = 'No user found for that email.';
-      else if (e.code == 'wrong-password') message = 'Wrong password provided.';
-      else if (e.code == 'weak-password') message = 'The password provided is too weak.';
-      else if (e.code == 'email-already-in-use') message = 'The account already exists for that email.';
-      else if (e.code == 'invalid-email') message = 'The email address is invalid.';
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(message), backgroundColor: Colors.red),
-      );
+      String msg = e.message ?? "Authentication failed";
+      if (e.code == 'user-not-found') msg = "No user found for that email.";
+      else if (e.code == 'wrong-password') msg = "Wrong password.";
+      else if (e.code == 'email-already-in-use') msg = "Email already in use.";
+      _showError(msg);
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(e.toString()), backgroundColor: Colors.red),
-      );
+      _showError("Error: $e");
     } finally {
       if (mounted) setState(() => isLoading = false);
     }
+  }
+
+  void _showError(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message), backgroundColor: Colors.red, duration: const Duration(seconds: 4)),
+    );
   }
 
   @override
@@ -264,49 +295,39 @@ class _AuthScreenState extends ConsumerState<AuthScreen> with SingleTickerProvid
               children: [
                 Text(
                   isLogin ? "Welcome back!" : "Create Account",
-                  style: const TextStyle(
-                    fontSize: 32,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.white,
-                    letterSpacing: -0.5,
-                  ),
+                  style: const TextStyle(fontSize: 32, fontWeight: FontWeight.bold, color: Colors.white, letterSpacing: -0.5),
                 ),
                 const SizedBox(height: 8),
                 Text(
                   isLogin ? "Enter your credential to continue" : "Sign up to get started!",
-                  style: TextStyle(
-                    fontSize: 16,
-                    color: Colors.white.withOpacity(0.6),
-                  ),
+                  style: TextStyle(fontSize: 16, color: Colors.white.withOpacity(0.6)),
                 ),
               ],
             ),
           ),
           const SizedBox(height: 30),
-
           Expanded(
             child: Container(
               width: double.infinity,
               decoration: const BoxDecoration(
                 color: bgCream,
-                borderRadius: BorderRadius.only(
-                  topLeft: Radius.circular(40),
-                  topRight: Radius.circular(40),
-                ),
+                borderRadius: BorderRadius.only(topLeft: Radius.circular(40), topRight: Radius.circular(40)),
               ),
               child: SingleChildScrollView(
                 physics: const BouncingScrollPhysics(),
-                padding: const EdgeInsets.all(24),
+                padding: EdgeInsets.only(
+                  left: 24,
+                  right: 24,
+                  top: 24,
+                  bottom: MediaQuery.of(context).viewInsets.bottom + 24,
+                ),
                 child: Column(
                   children: [
-                    // --- TOGGLE SWITCH ---
+                    // TOGGLE
                     Container(
                       height: 55,
                       padding: const EdgeInsets.all(4),
-                      decoration: BoxDecoration(
-                        color: cardDark,
-                        borderRadius: BorderRadius.circular(30),
-                      ),
+                      decoration: BoxDecoration(color: cardDark, borderRadius: BorderRadius.circular(30)),
                       child: Row(
                         children: [
                           _buildToggleBtn("Log in", true, bgCream, cardDark),
@@ -316,7 +337,7 @@ class _AuthScreenState extends ConsumerState<AuthScreen> with SingleTickerProvid
                     ),
                     const SizedBox(height: 30),
 
-                    // --- FORM FIELDS ---
+                    // FORM
                     FadeTransition(
                       opacity: _fadeAnimation,
                       child: Column(
@@ -324,68 +345,33 @@ class _AuthScreenState extends ConsumerState<AuthScreen> with SingleTickerProvid
                         children: [
                           if (!isLogin) ...[
                             _buildLabel("Full Name"),
-                            _buildTextField(
-                              controller: nameController,
-                              hint: "Enter Full Name",
-                              icon: Icons.person_outline,
-                            ),
+                            _buildTextField(controller: nameController, hint: "Enter Full Name", icon: Icons.person_outline),
                             const SizedBox(height: 20),
                           ],
-
                           _buildLabel("Email id"),
-                          _buildTextField(
-                            controller: emailController,
-                            hint: "Enter Email",
-                            icon: Icons.email_outlined,
-                            inputType: TextInputType.emailAddress,
-                          ),
+                          _buildTextField(controller: emailController, hint: "Enter Email", icon: Icons.email_outlined, inputType: TextInputType.emailAddress),
                           const SizedBox(height: 20),
-
                           _buildLabel("Password"),
-                          _buildTextField(
-                            controller: passController,
-                            hint: "Enter password",
-                            icon: Icons.lock_outline,
-                            isPassword: true,
-                          ),
-
+                          _buildTextField(controller: passController, hint: "Enter password", icon: Icons.lock_outline, isPassword: true),
+                          
                           if (isLogin) ...[
                             const SizedBox(height: 15),
                             Row(
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
-                                // --- REMEMBER ME BUTTON ---
                                 GestureDetector(
-                                  onTap: () {
-                                    setState(() {
-                                      rememberMe = !rememberMe;
-                                    });
-                                  },
+                                  onTap: () => setState(() => rememberMe = !rememberMe),
                                   child: Row(
                                     children: [
-                                      Icon(
-                                        rememberMe ? Icons.check_box : Icons.check_box_outline_blank,
-                                        size: 20,
-                                        color: cardDark
-                                      ),
+                                      Icon(rememberMe ? Icons.check_box : Icons.check_box_outline_blank, size: 20, color: cardDark),
                                       const SizedBox(width: 8),
                                       Text("Remember me", style: TextStyle(color: cardDark.withOpacity(0.6))),
                                     ],
                                   ),
                                 ),
-
-                                // --- FORGOT PASSWORD BUTTON ---
                                 GestureDetector(
-                                  onTap: () {
-                                    Navigator.push(context, MaterialPageRoute(builder: (_) => const ForgotPasswordScreen()));
-                                  },
-                                  child: Text(
-                                    "Forgot Password",
-                                    style: TextStyle(
-                                      color: cardDark.withOpacity(0.6),
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                  ),
+                                  onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ForgotPasswordScreen())),
+                                  child: Text("Forgot Password", style: TextStyle(color: cardDark.withOpacity(0.6), fontWeight: FontWeight.w600)),
                                 ),
                               ],
                             ),
@@ -393,10 +379,9 @@ class _AuthScreenState extends ConsumerState<AuthScreen> with SingleTickerProvid
                         ],
                       ),
                     ),
-
                     const SizedBox(height: 30),
 
-                    // --- MAIN ACTION BUTTON ---
+                    // AUTH BUTTON
                     SizedBox(
                       width: double.infinity,
                       height: 60,
@@ -405,85 +390,49 @@ class _AuthScreenState extends ConsumerState<AuthScreen> with SingleTickerProvid
                         style: ElevatedButton.styleFrom(
                           backgroundColor: cardDark,
                           foregroundColor: Colors.white,
-                          elevation: 0,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(16),
-                          ),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                         ),
                         child: isLoading
-                            ? const SizedBox(
-                                height: 24,
-                                width: 24,
-                                child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)
-                              )
-                            : Text(
-                                isLogin ? "Log In" : "Sign up",
-                                style: const TextStyle(
-                                  fontSize: 18,
-                                  fontWeight: FontWeight.bold,
-                                  letterSpacing: 0.5,
-                                ),
-                              ),
+                            ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                            : Text(isLogin ? "Log In" : "Sign up", style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                       ),
                     ),
-
                     const SizedBox(height: 20),
 
-                    // --- DIVIDER OR ---
+                    // DIVIDER
                     Row(
                       children: [
                         Expanded(child: Divider(color: cardDark.withOpacity(0.2))),
-                        Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 10),
-                          child: Text("OR", style: TextStyle(color: cardDark.withOpacity(0.4))),
-                        ),
+                        Padding(padding: const EdgeInsets.symmetric(horizontal: 10), child: Text("OR", style: TextStyle(color: cardDark.withOpacity(0.4)))),
                         Expanded(child: Divider(color: cardDark.withOpacity(0.2))),
                       ],
                     ),
                     const SizedBox(height: 20),
 
-                    // --- GOOGLE BUTTON ---
+                    // GOOGLE BUTTON
                     SizedBox(
                       width: double.infinity,
                       height: 55,
                       child: OutlinedButton.icon(
                         onPressed: isLoading ? null : _handleGoogleSignIn,
-                        icon: const Icon(Icons.g_mobiledata, size: 30, color: Colors.black), // Using generic Icon, replace with Image.asset if you have png
-                        label: const Text(
-                          "Continue with Google",
-                          style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
-                            color: cardDark,
-                          ),
-                        ),
+                        icon: const Icon(Icons.g_mobiledata, size: 30, color: Colors.black),
+                        label: const Text("Continue with Google", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: cardDark)),
                         style: OutlinedButton.styleFrom(
                           side: BorderSide(color: cardDark.withOpacity(0.2)),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(16),
-                          ),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                         ),
                       ),
                     ),
-
                     const SizedBox(height: 20),
 
+                    // BOTTOM TEXT
                     Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        Text(
-                          isLogin ? "Don't have an account? " : "Already have an account? ",
-                          style: TextStyle(color: cardDark.withOpacity(0.6)),
-                        ),
+                        Text(isLogin ? "Don't have an account? " : "Already have an account? ", style: TextStyle(color: cardDark.withOpacity(0.6))),
                         GestureDetector(
                           onTap: toggleAuthMode,
-                          child: Text(
-                            isLogin ? "Sign Up" : "Log In",
-                            style: const TextStyle(
-                              fontWeight: FontWeight.bold,
-                              color: cardDark,
-                            ),
-                          ),
+                          child: Text(isLogin ? "Sign Up" : "Log In", style: const TextStyle(fontWeight: FontWeight.bold, color: cardDark)),
                         ),
                       ],
                     ),
@@ -498,93 +447,44 @@ class _AuthScreenState extends ConsumerState<AuthScreen> with SingleTickerProvid
     );
   }
 
-  Widget _buildToggleBtn(String text, bool isBtnLogin, Color activeColor, Color inactiveColor) {
-    final bool isActive = isLogin == isBtnLogin;
+  Widget _buildToggleBtn(String text, bool isBtnLogin, Color active, Color inactive) {
+    bool isActive = isLogin == isBtnLogin;
     return Expanded(
       child: GestureDetector(
-        onTap: () {
-          if (isLogin != isBtnLogin) toggleAuthMode();
-        },
+        onTap: () { if (isLogin != isBtnLogin) toggleAuthMode(); },
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 200),
           alignment: Alignment.center,
-          decoration: BoxDecoration(
-            color: isActive ? activeColor : Colors.transparent,
-            borderRadius: BorderRadius.circular(26),
-          ),
-          child: Text(
-            text,
-            style: TextStyle(
-              color: isActive ? inactiveColor : Colors.white,
-              fontWeight: FontWeight.bold,
-              fontSize: 16,
-            ),
-          ),
+          decoration: BoxDecoration(color: isActive ? active : Colors.transparent, borderRadius: BorderRadius.circular(26)),
+          child: Text(text, style: TextStyle(color: isActive ? inactive : Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
         ),
       ),
     );
   }
 
-  Widget _buildLabel(String text) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8, left: 4),
-      child: Text(
-        text,
-        style: TextStyle(
-          fontSize: 14,
-          fontWeight: FontWeight.w600,
-          color: const Color(0xFF181816).withOpacity(0.7),
-        ),
-      ),
-    );
-  }
+  Widget _buildLabel(String text) => Padding(padding: const EdgeInsets.only(bottom: 8, left: 4), child: Text(text, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Color(0xFF181816))));
 
-  Widget _buildTextField({
-    required TextEditingController controller,
-    required String hint,
-    required IconData icon,
-    bool isPassword = false,
-    TextInputType inputType = TextInputType.text,
-  }) {
+  Widget _buildTextField({required TextEditingController controller, required String hint, required IconData icon, bool isPassword = false, TextInputType inputType = TextInputType.text}) {
     return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.black12),
-      ),
+      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16), border: Border.all(color: Colors.black12)),
       child: TextField(
         controller: controller,
         obscureText: isPassword && !isPasswordVisible,
         keyboardType: inputType,
-        style: const TextStyle(color: Colors.black87),
         decoration: InputDecoration(
           hintText: hint,
-          hintStyle: const TextStyle(color: Colors.black38),
-          border: InputBorder.none,
           prefixIcon: Icon(icon, color: Colors.black54),
-          suffixIcon: isPassword
-              ? IconButton(
-                  icon: Icon(
-                    isPasswordVisible ? Icons.visibility : Icons.visibility_off,
-                    color: Colors.black54,
-                  ),
-                  onPressed: () => setState(() => isPasswordVisible = !isPasswordVisible),
-                )
-              : null,
-          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+          border: InputBorder.none,
+          suffixIcon: isPassword ? IconButton(icon: Icon(isPasswordVisible ? Icons.visibility : Icons.visibility_off, color: Colors.black54), onPressed: () => setState(() => isPasswordVisible = !isPasswordVisible)) : null,
+          contentPadding: const EdgeInsets.all(16),
         ),
       ),
     );
   }
 }
 
-// ==========================================
-// 2. FORGOT PASSWORD SCREEN
-// ==========================================
-
 class ForgotPasswordScreen extends StatefulWidget {
   const ForgotPasswordScreen({Key? key}) : super(key: key);
-
   @override
   State<ForgotPasswordScreen> createState() => _ForgotPasswordScreenState();
 }
@@ -594,31 +494,19 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
   bool isLoading = false;
 
   Future<void> _handleReset() async {
-    final email = emailController.text.trim();
-    if (email.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Please enter your registered email")),
-      );
+    if (emailController.text.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Enter email"), backgroundColor: Colors.red));
       return;
     }
-
     setState(() => isLoading = true);
-
     try {
-      await FirebaseAuth.instance.sendPasswordResetEmail(email: email);
-      if (!mounted) return;
-      
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text("Reset link sent! Check your email (and spam)."),
-          backgroundColor: Colors.green,
-        ),
-      );
-      Navigator.pop(context); // Go back to login
-    } on FirebaseAuthException catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(e.message ?? "Error"), backgroundColor: Colors.red),
-      );
+      await FirebaseAuth.instance.sendPasswordResetEmail(email: emailController.text.trim());
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Reset link sent!"), backgroundColor: Colors.green));
+        Navigator.pop(context);
+      }
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Error sending link"), backgroundColor: Colors.red));
     } finally {
       if (mounted) setState(() => isLoading = false);
     }
@@ -626,153 +514,27 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
 
   @override
   Widget build(BuildContext context) {
-    const bgCream = Color(0xFFEFF3E6);
     const cardDark = Color(0xFF181816);
-
     return Scaffold(
       backgroundColor: cardDark,
-      appBar: AppBar(
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_new, color: Colors.white),
-          onPressed: () => Navigator.pop(context),
-        ),
-      ),
-      body: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // HEADER
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  "Forgot Password?",
-                  style: TextStyle(
-                    fontSize: 32,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.white,
-                    letterSpacing: -0.5,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  "Don't worry! It happens. Please enter the address associated with your account.",
-                  style: TextStyle(
-                    fontSize: 16,
-                    color: Colors.white.withOpacity(0.6),
-                    height: 1.4,
-                  ),
-                ),
-              ],
+      appBar: AppBar(backgroundColor: Colors.transparent, leading: IconButton(icon: const Icon(Icons.arrow_back, color: Colors.white), onPressed: () => Navigator.pop(context))),
+      body: Padding(
+        padding: const EdgeInsets.all(24.0),
+        child: Column(
+          children: [
+            const Text("Forgot Password", style: TextStyle(fontSize: 32, color: Colors.white, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 20),
+            Container(
+              decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16)),
+              child: TextField(controller: emailController, decoration: const InputDecoration(hintText: "Enter Email", border: InputBorder.none, contentPadding: EdgeInsets.all(16))),
             ),
-          ),
-          const SizedBox(height: 30),
-
-          // BOTTOM CARD
-          Expanded(
-            child: Container(
+            const SizedBox(height: 20),
+            SizedBox(
               width: double.infinity,
-              decoration: const BoxDecoration(
-                color: bgCream,
-                borderRadius: BorderRadius.only(
-                  topLeft: Radius.circular(40),
-                  topRight: Radius.circular(40),
-                ),
-              ),
-              child: SingleChildScrollView(
-                physics: const BouncingScrollPhysics(),
-                padding: const EdgeInsets.all(24),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const SizedBox(height: 20),
-                    _buildLabel("Email ID"),
-                    _buildTextField(
-                      controller: emailController,
-                      hint: "Enter your email",
-                      icon: Icons.email_outlined,
-                    ),
-                    const SizedBox(height: 40),
-
-                    // SEND BUTTON
-                    SizedBox(
-                      width: double.infinity,
-                      height: 60,
-                      child: ElevatedButton(
-                        onPressed: isLoading ? null : _handleReset,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: cardDark,
-                          foregroundColor: Colors.white,
-                          elevation: 0,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(16),
-                          ),
-                        ),
-                        child: isLoading
-                            ? const SizedBox(
-                                height: 24,
-                                width: 24,
-                                child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)
-                              )
-                            : const Text(
-                                "Send Reset Link",
-                                style: TextStyle(
-                                  fontSize: 18,
-                                  fontWeight: FontWeight.bold,
-                                  letterSpacing: 0.5,
-                                ),
-                              ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // Helper widgets specifically for ForgotPassword Screen
-  Widget _buildLabel(String text) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8, left: 4),
-      child: Text(
-        text,
-        style: TextStyle(
-          fontSize: 14,
-          fontWeight: FontWeight.w600,
-          color: const Color(0xFF181816).withOpacity(0.7),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildTextField({
-    required TextEditingController controller,
-    required String hint,
-    required IconData icon,
-  }) {
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.black12),
-      ),
-      child: TextField(
-        controller: controller,
-        keyboardType: TextInputType.emailAddress,
-        style: const TextStyle(color: Colors.black87),
-        decoration: InputDecoration(
-          hintText: hint,
-          hintStyle: const TextStyle(color: Colors.black38),
-          border: InputBorder.none,
-          prefixIcon: Icon(icon, color: Colors.black54),
-          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+              height: 50,
+              child: ElevatedButton(onPressed: isLoading ? null : _handleReset, child: isLoading ? const CircularProgressIndicator() : const Text("Send Link")),
+            )
+          ],
         ),
       ),
     );

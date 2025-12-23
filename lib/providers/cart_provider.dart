@@ -51,11 +51,64 @@ class CartNotifier extends StateNotifier<List<CartItem>> {
     ];
   }
 
+  void removeItemByProductId(String productId, String size, String color) {
+    state = state.where((item) => 
+      !(item.product.id == productId && 
+        item.selectedSize == size && 
+        item.selectedColor == color)
+    ).toList();
+  }
+
+  void incrementQuantity(String productId, String size, String color) {
+    final index = state.indexWhere(
+      (item) =>
+          item.product.id == productId &&
+          item.selectedSize == size &&
+          item.selectedColor == color,
+    );
+
+    if (index != -1) {
+      final item = state[index];
+      state[index] = CartItem(
+        product: item.product,
+        selectedSize: item.selectedSize,
+        selectedColor: item.selectedColor,
+        quantity: item.quantity + 1,
+      );
+      state = [...state];
+    }
+  }
+
+  void decrementQuantity(String productId, String size, String color) {
+    final index = state.indexWhere(
+      (item) =>
+          item.product.id == productId &&
+          item.selectedSize == size &&
+          item.selectedColor == color,
+    );
+
+    if (index != -1) {
+      final item = state[index];
+      if (item.quantity > 1) {
+        state[index] = CartItem(
+          product: item.product,
+          selectedSize: item.selectedSize,
+          selectedColor: item.selectedColor,
+          quantity: item.quantity - 1,
+        );
+        state = [...state];
+      } else {
+        // Remove item if quantity becomes 0
+        removeFromCart(index);
+      }
+    }
+  }
+
   void clearCart() {
     state = [];
   }
 
   double getTotalPrice() {
-    return state.fold(0, (total, item) => total + item.totalPrice);
+    return state.fold(0.0, (total, item) => total + item.totalPrice);
   }
 }

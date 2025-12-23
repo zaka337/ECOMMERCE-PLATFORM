@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/cart_item.dart';
 import '../models/order.dart';
+import '../providers/cart_provider.dart';
 import 'order_confirmation_screen.dart';
 
-class CheckoutScreen extends StatefulWidget {
+class CheckoutScreen extends ConsumerStatefulWidget {
   final double totalAmount;
   final List<CartItem> cartItems;
 
@@ -14,10 +16,10 @@ class CheckoutScreen extends StatefulWidget {
   }) : super(key: key);
 
   @override
-  State<CheckoutScreen> createState() => _CheckoutScreenState();
+  ConsumerState<CheckoutScreen> createState() => _CheckoutScreenState();
 }
 
-class _CheckoutScreenState extends State<CheckoutScreen> {
+class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
   final _formKey = GlobalKey<FormState>();
   late TextEditingController _fullNameController;
   late TextEditingController _emailController;
@@ -57,6 +59,9 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
       // Mock API call
       await submitOrder(order);
 
+      // Clear cart after successful order
+      ref.read(cartProvider.notifier).clearCart();
+
       // Navigate to confirmation screen
       if (mounted) {
         Navigator.pushReplacement(
@@ -71,34 +76,74 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
 
   @override
   Widget build(BuildContext context) {
+    const colorBackground = Color(0xFFF5F5F7);
+    const colorDarkGreen = Color(0xFF1E3A34);
+    const colorBlack = Color(0xFF000000);
+    const colorWhite = Color(0xFFFFFFFF);
+
     return Scaffold(
+      backgroundColor: colorBackground,
       appBar: AppBar(
-        title: const Text('Checkout'),
+        backgroundColor: colorBackground,
+        elevation: 0,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back, color: colorBlack),
+          onPressed: () => Navigator.pop(context),
+        ),
+        title: Text(
+          'CHECKOUT',
+          style: TextStyle(
+            fontSize: 24,
+            fontWeight: FontWeight.w900,
+            fontStyle: FontStyle.italic,
+            color: colorBlack,
+            letterSpacing: 1.5,
+          ),
+        ),
       ),
       body: SingleChildScrollView(
         child: Padding(
-          padding: const EdgeInsets.all(16.0),
+          padding: EdgeInsets.only(
+            left: 20,
+            right: 20,
+            top: 20,
+            bottom: MediaQuery.of(context).viewInsets.bottom + 20,
+          ),
           child: Form(
             key: _formKey,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text(
+                Text(
                   'Shipping Information',
                   style: TextStyle(
-                    fontSize: 18,
+                    fontSize: 20,
                     fontWeight: FontWeight.bold,
+                    color: colorBlack,
                   ),
                 ),
-                const SizedBox(height: 16),
+                const SizedBox(height: 20),
                 TextFormField(
                   controller: _fullNameController,
+                  style: TextStyle(color: colorBlack),
                   decoration: InputDecoration(
                     labelText: 'Full Name',
+                    labelStyle: TextStyle(color: colorBlack.withOpacity(0.6)),
+                    filled: true,
+                    fillColor: colorWhite,
                     border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
+                      borderRadius: BorderRadius.circular(15),
+                      borderSide: BorderSide(color: colorBlack.withOpacity(0.1)),
                     ),
-                    prefixIcon: const Icon(Icons.person),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(15),
+                      borderSide: BorderSide(color: colorBlack.withOpacity(0.1)),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(15),
+                      borderSide: const BorderSide(color: colorDarkGreen, width: 2),
+                    ),
+                    prefixIcon: Icon(Icons.person, color: colorDarkGreen),
                   ),
                   validator: (value) {
                     if (value == null || value.isEmpty) {
@@ -107,15 +152,28 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                     return null;
                   },
                 ),
-                const SizedBox(height: 12),
+                const SizedBox(height: 16),
                 TextFormField(
                   controller: _emailController,
+                  style: TextStyle(color: colorBlack),
                   decoration: InputDecoration(
                     labelText: 'Email Address',
+                    labelStyle: TextStyle(color: colorBlack.withOpacity(0.6)),
+                    filled: true,
+                    fillColor: colorWhite,
                     border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
+                      borderRadius: BorderRadius.circular(15),
+                      borderSide: BorderSide(color: colorBlack.withOpacity(0.1)),
                     ),
-                    prefixIcon: const Icon(Icons.email),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(15),
+                      borderSide: BorderSide(color: colorBlack.withOpacity(0.1)),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(15),
+                      borderSide: const BorderSide(color: colorDarkGreen, width: 2),
+                    ),
+                    prefixIcon: Icon(Icons.email, color: colorDarkGreen),
                   ),
                   validator: (value) {
                     if (value == null || value.isEmpty) {
@@ -128,15 +186,28 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                     return null;
                   },
                 ),
-                const SizedBox(height: 12),
+                const SizedBox(height: 16),
                 TextFormField(
                   controller: _phoneController,
+                  style: TextStyle(color: colorBlack),
                   decoration: InputDecoration(
                     labelText: 'Phone Number',
+                    labelStyle: TextStyle(color: colorBlack.withOpacity(0.6)),
+                    filled: true,
+                    fillColor: colorWhite,
                     border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
+                      borderRadius: BorderRadius.circular(15),
+                      borderSide: BorderSide(color: colorBlack.withOpacity(0.1)),
                     ),
-                    prefixIcon: const Icon(Icons.phone),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(15),
+                      borderSide: BorderSide(color: colorBlack.withOpacity(0.1)),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(15),
+                      borderSide: const BorderSide(color: colorDarkGreen, width: 2),
+                    ),
+                    prefixIcon: Icon(Icons.phone, color: colorDarkGreen),
                   ),
                   validator: (value) {
                     if (value == null || value.isEmpty) {
@@ -148,15 +219,28 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                     return null;
                   },
                 ),
-                const SizedBox(height: 12),
+                const SizedBox(height: 16),
                 TextFormField(
                   controller: _addressController,
+                  style: TextStyle(color: colorBlack),
                   decoration: InputDecoration(
                     labelText: 'Shipping Address',
+                    labelStyle: TextStyle(color: colorBlack.withOpacity(0.6)),
+                    filled: true,
+                    fillColor: colorWhite,
                     border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
+                      borderRadius: BorderRadius.circular(15),
+                      borderSide: BorderSide(color: colorBlack.withOpacity(0.1)),
                     ),
-                    prefixIcon: const Icon(Icons.location_on),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(15),
+                      borderSide: BorderSide(color: colorBlack.withOpacity(0.1)),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(15),
+                      borderSide: const BorderSide(color: colorDarkGreen, width: 2),
+                    ),
+                    prefixIcon: Icon(Icons.location_on, color: colorDarkGreen),
                   ),
                   maxLines: 3,
                   validator: (value) {
@@ -166,29 +250,37 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                     return null;
                   },
                 ),
-                const SizedBox(height: 20),
+                const SizedBox(height: 24),
                 Container(
-                  padding: const EdgeInsets.all(16),
+                  padding: const EdgeInsets.all(20),
                   decoration: BoxDecoration(
-                    color: Colors.grey[100],
-                    borderRadius: BorderRadius.circular(8),
+                    color: colorWhite,
+                    borderRadius: BorderRadius.circular(20),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.05),
+                        blurRadius: 10,
+                        offset: const Offset(0, 2),
+                      ),
+                    ],
                   ),
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      const Text(
+                      Text(
                         'Order Total:',
                         style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
+                          fontSize: 18,
+                          fontWeight: FontWeight.w600,
+                          color: colorBlack.withOpacity(0.7),
                         ),
                       ),
                       Text(
                         '\$${widget.totalAmount.toStringAsFixed(2)}',
                         style: const TextStyle(
-                          fontSize: 18,
+                          fontSize: 28,
                           fontWeight: FontWeight.bold,
-                          color: Colors.blue,
+                          color: colorBlack,
                         ),
                       ),
                     ],
@@ -197,22 +289,28 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                 const SizedBox(height: 24),
                 SizedBox(
                   width: double.infinity,
+                  height: 56,
                   child: ElevatedButton(
                     style: ElevatedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 16),
-                      backgroundColor: Colors.green,
+                      backgroundColor: colorDarkGreen,
+                      foregroundColor: colorWhite,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(30),
+                      ),
+                      elevation: 0,
                     ),
                     onPressed: _submitOrder,
                     child: const Text(
-                      'Place Order',
+                      'PLACE ORDER',
                       style: TextStyle(
-                        color: Colors.white,
                         fontSize: 16,
                         fontWeight: FontWeight.bold,
+                        letterSpacing: 1.5,
                       ),
                     ),
                   ),
                 ),
+                SizedBox(height: MediaQuery.of(context).padding.bottom + 20),
               ],
             ),
           ),
